@@ -7,10 +7,11 @@ st.set_page_config(page_title="DFW Weather Risk", layout="centered")
 def get_current_location():
     ipinfo_response = requests.get('https://ipinfo.io/json')
     if ipinfo_response.status_code != 200:
-        return None
+        return None, None, None, None
     location_data = ipinfo_response.json()
     lat, lon = location_data['loc'].split(',')
-    return float(lat), float(lon)
+    city = location_data.get('city', 'Unknown')
+    return float(lat), float(lon), city, location_data['loc']
 
 # Get precipitation over the last 24 hours
 def get_precipitation_past_24hrs(lat, lon):
@@ -28,11 +29,10 @@ def get_precipitation_past_24hrs(lat, lon):
 
 # Get current weather data
 def get_weather_data():
-    location = get_current_location()
-    if not location:
-        return [], 0
+    lat, lon, city, location_str = get_current_location()
+    if lat is None:
+        return [], 0, "Unknown", ""
 
-    lat, lon = location
     precip_last_24hrs = get_precipitation_past_24hrs(lat, lon)
     weather_data = []
 
@@ -61,7 +61,7 @@ def get_weather_data():
                 'pressure': data['surface_pressure'][i]
             })
 
-    return weather_data, precip_last_24hrs
+    return weather_data, precip_last_24hrs, city, location_str
 
 # Calculate risk score
 def calculate_severe_risk(period):
@@ -98,9 +98,14 @@ def calculate_severe_risk(period):
 # Streamlit UI
 st.title("DFW Severe Weather Risk")
 
-weather_data, precip_last_24hrs = get_weather_data()
+weather_data, precip_last_24hrs, city, location_str = get_weather_data()
 
+st.subheader(f"Location: {city}")
 st.subheader(f"Precipitation in Last 24 Hours: {precip_last_24hrs} inches")
+
+if location_str:
+    lat, lon = map(float, location_str.split(','))
+    st.map(data={"lat": [lat], "lon": [lon]})
 
 if not weather_data:
     st.error("Could not retrieve weather data.")
