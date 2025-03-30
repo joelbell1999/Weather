@@ -1,5 +1,3 @@
-# This script should be saved as streamlit_app.py
-
 import streamlit as st
 import requests
 import pandas as pd
@@ -59,8 +57,11 @@ def get_forecast(lat, lon):
         f"&temperature_unit=fahrenheit&windspeed_unit=mph&precipitation_unit=inch&timezone=auto"
     )
     res = requests.get(url).json()
-    hourly = res["hourly"]
 
+    if "hourly" not in res or "daily" not in res:
+        return None, None, None, None, None, None, None, None
+
+    hourly = res["hourly"]
     data = []
     for i, time in enumerate(hourly["time"]):
         dt = datetime.fromisoformat(time)
@@ -142,11 +143,17 @@ if user_input:
 
     st.markdown(f"**Location:** {label}")
     st.map({"lat": [lat], "lon": [lon]})
+
     station = find_nearest_station(lat, lon)
     cape = get_rap_cape(station)
 
-    forecast_data, precip_24h, times, cape_vals, cin_vals, full_times, sunrise, sunset = get_forecast(lat, lon)
-    now = datetime.fromisoformat(full_times[0])  # FIXED local time
+    result = get_forecast(lat, lon)
+    if result[0] is None:
+        st.error("Failed to retrieve forecast data. Please try a different location.")
+        st.stop()
+
+    forecast_data, precip_24h, times, cape_vals, cin_vals, full_times, sunrise, sunset = result
+    now = datetime.fromisoformat(full_times[0])
     set_background_theme(now, sunrise, sunset)
 
     st.caption(f"**Local Time (Forecast Location):** {now.strftime('%A %I:%M %p')}")
@@ -207,5 +214,4 @@ if user_input:
                 st.warning("Moderate Cap: May break with heating or lift.")
             elif cin_val > -50:
                 st.success("Weak or No Cap: Storms more likely.")
-
             st.markdown("---")
