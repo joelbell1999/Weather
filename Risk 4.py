@@ -127,7 +127,7 @@ navigator.geolocation.getCurrentPosition(
 </script>
 """, unsafe_allow_html=True)
 
-location_coords = st.experimental_get_query_params().get("geolocation", [None])[0]
+location_coords = st.query_params.get("geolocation", [None])[0]
 
 if location_coords and location_coords != "geo_failed":
     lat, lon = map(float, location_coords.split(","))
