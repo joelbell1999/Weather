@@ -8,18 +8,16 @@ from io import StringIO
 
 # Sounding stations for IEM RAP CAPE
 stations = {
-    "KOUN": {"lat": 35.23, "lon": -97.46},  # Norman, OK
-    "KFWD": {"lat": 32.83, "lon": -97.30},  # Fort Worth, TX
-    "KAMA": {"lat": 35.22, "lon": -101.72},  # Amarillo, TX
-    "KLZK": {"lat": 34.83, "lon": -92.26},   # Little Rock, AR
-    "KSHV": {"lat": 32.45, "lon": -93.83}    # Shreveport, LA
+    "KOUN": {"lat": 35.23, "lon": -97.46},
+    "KFWD": {"lat": 32.83, "lon": -97.30},
+    "KAMA": {"lat": 35.22, "lon": -101.72},
+    "KLZK": {"lat": 34.83, "lon": -92.26},
+    "KSHV": {"lat": 32.45, "lon": -93.83}
 }
 
-# Find nearest sounding station
 def find_nearest_station(lat, lon):
     return min(stations, key=lambda s: geodesic((lat, lon), (stations[s]['lat'], stations[s]['lon'])).miles)
 
-# Get RAP CAPE from IEM
 def get_rap_cape(station):
     now = datetime.utcnow()
     url = (
@@ -33,7 +31,6 @@ def get_rap_cape(station):
     df = pd.read_csv(StringIO(r.text))
     return df["cape"].dropna().iloc[-1] if "cape" in df.columns and not df["cape"].dropna().empty else None
 
-# ZIP to lat/lon
 def zip_to_latlon(zip_code):
     try:
         r = requests.get(f"https://api.zippopotam.us/us/{zip_code}")
@@ -43,7 +40,6 @@ def zip_to_latlon(zip_code):
     except:
         return None, None, None
 
-# City to lat/lon
 def city_to_latlon(city):
     url = f"https://geocoding-api.open-meteo.com/v1/search?name={city}&country=US"
     r = requests.get(url).json()
@@ -52,7 +48,6 @@ def city_to_latlon(city):
         return res["latitude"], res["longitude"], res["name"]
     return None, None, None
 
-# Get forecast data from Open-Meteo
 def get_forecast(lat, lon):
     url = (
         f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
@@ -83,7 +78,6 @@ def get_forecast(lat, lon):
     daily_precip = res.get("daily", {}).get("precipitation_sum", [0])[0]
     return data, daily_precip
 
-# Risk scoring using IEM CAPE + forecast
 def calculate_risk(cape, forecast):
     score = 0
     if cape >= 3000: score += 30
@@ -97,7 +91,7 @@ def calculate_risk(cape, forecast):
     elif forecast["humidity"] >= 60 and forecast["dewpoint"] >= 60: score += 5
     return min(score, 100)
 
-# --- Streamlit UI ---
+# --- Streamlit App ---
 st.set_page_config("Severe Weather Dashboard", layout="centered")
 st.title("Severe Weather Dashboard")
 user_input = st.text_input("Enter ZIP Code or City, State", "76247")
@@ -115,20 +109,31 @@ if user_input:
     st.markdown(f"**Location:** {label}")
     st.map({"lat": [lat], "lon": [lon]})
 
-    # Get CAPE and Forecast
+    # --- Get CAPE ---
     station = find_nearest_station(lat, lon)
     cape = get_rap_cape(station)
-    forecast_data, precip_24h = get_forecast(lat, lon)
+    cape_source = None
 
     if cape is not None:
-        st.subheader(f"Real-Time CAPE from RAP: {cape:.0f} J/kg (Station: {station})")
+        cape_source = f"Real-Time RAP Sounding (Station: {station})"
     else:
-        st.error("CAPE unavailable from RAP sounding.")
+        fallback_url = (
+            f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
+            f"&hourly=cape&temperature_unit=fahrenheit&timezone=auto"
+        )
+        fallback_res = requests.get(fallback_url).json()
+        cape = fallback_res["hourly"]["cape"][0]
+        cape_source = "Model Forecast CAPE (Open-Meteo Fallback)"
 
+    st.subheader(f"CAPE: {cape:.0f} J/kg")
+    st.caption(f"Source: {cape_source}")
+
+    # --- Forecast Data ---
+    forecast_data, precip_24h = get_forecast(lat, lon)
     st.subheader(f"24-Hour Precipitation: {precip_24h:.2f} in")
 
     for hour in forecast_data:
-        risk = calculate_risk(cape or 0, hour)
+        risk = calculate_risk(cape, hour)
         st.markdown(f"### {hour['time']}")
         st.metric("Temp", f"{hour['temperature']} °F")
         st.metric("Wind / Gusts", f"{hour['windSpeed']} / {hour['windGusts']} mph")
