@@ -5,8 +5,8 @@ from datetime import datetime
 import pytz
 from geopy.distance import geodesic
 from io import StringIO
+import matplotlib.pyplot as plt
 
-# Sounding stations for IEM RAP CAPE
 stations = {
     "KOUN": {"lat": 35.23, "lon": -97.46},
     "KFWD": {"lat": 32.83, "lon": -97.30},
@@ -52,7 +52,7 @@ def get_forecast(lat, lon):
     url = (
         f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
         f"&hourly=temperature_2m,windspeed_10m,windgusts_10m,precipitation,precipitation_probability,"
-        f"cloudcover,dewpoint_2m,relative_humidity_2m&daily=precipitation_sum&past_days=1&forecast_days=1"
+        f"cloudcover,dewpoint_2m,relative_humidity_2m,cape&daily=precipitation_sum&past_days=1&forecast_days=1"
         f"&temperature_unit=fahrenheit&windspeed_unit=mph&precipitation_unit=inch&timezone=auto"
     )
     res = requests.get(url).json()
@@ -73,10 +73,20 @@ def get_forecast(lat, lon):
                 "precipProbability": hourly["precipitation_probability"][i],
                 "cloudCover": hourly["cloudcover"][i],
                 "dewpoint": hourly["dewpoint_2m"][i],
-                "humidity": hourly["relative_humidity_2m"][i]
+                "humidity": hourly["relative_humidity_2m"][i],
+                "cape": hourly["cape"][i]
             })
+
+    # Collect CAPE trend data
+    cape_times = []
+    cape_values = []
+    for i, time in enumerate(hourly["time"][:12]):  # next 12 hours
+        dt = datetime.fromisoformat(time).astimezone(central)
+        cape_times.append(dt.strftime("%I %p"))
+        cape_values.append(hourly["cape"][i])
+
     daily_precip = res.get("daily", {}).get("precipitation_sum", [0])[0]
-    return data, daily_precip
+    return data, daily_precip, cape_times, cape_values, hourly["time"]
 
 def calculate_risk(cape, forecast):
     score = 0
@@ -113,25 +123,35 @@ if user_input:
     station = find_nearest_station(lat, lon)
     cape = get_rap_cape(station)
     cape_source = None
+    cape_time = None
+
+    forecast_data, precip_24h, cape_times, cape_values, full_times = get_forecast(lat, lon)
 
     if cape is not None:
         cape_source = f"Real-Time RAP Sounding (Station: {station})"
+        cape_time = datetime.utcnow().strftime("%a %I:%M %p UTC")
     else:
-        fallback_url = (
-            f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
-            f"&hourly=cape&temperature_unit=fahrenheit&timezone=auto"
-        )
-        fallback_res = requests.get(fallback_url).json()
-        cape = fallback_res["hourly"]["cape"][0]
+        cape = forecast_data[0]["cape"]
         cape_source = "Model Forecast CAPE (Open-Meteo Fallback)"
+        model_time = full_times[0]
+        cape_time = datetime.fromisoformat(model_time).astimezone(pytz.timezone("US/Central")).strftime("%a %I:%M %p CT")
 
     st.subheader(f"CAPE: {cape:.0f} J/kg")
     st.caption(f"Source: {cape_source}")
+    st.caption(f"Updated: {cape_time}")
 
-    # --- Forecast Data ---
-    forecast_data, precip_24h = get_forecast(lat, lon)
+    # --- CAPE Trend Plot ---
+    st.subheader("CAPE Trend (Next 12 Hours)")
+    fig, ax = plt.subplots()
+    ax.plot(cape_times, cape_values, marker="o")
+    ax.set_ylabel("CAPE (J/kg)")
+    ax.set_xlabel("Time")
+    ax.set_title("Forecast CAPE Trend")
+    ax.grid(True)
+    st.pyplot(fig)
+
+    # --- Forecast Summary ---
     st.subheader(f"24-Hour Precipitation: {precip_24h:.2f} in")
-
     for hour in forecast_data:
         risk = calculate_risk(cape, hour)
         st.markdown(f"### {hour['time']}")
