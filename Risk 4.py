@@ -16,7 +16,6 @@ stations = {
     "KSHV": {"lat": 32.45, "lon": -93.83}
 }
 
-# --- Helpers ---
 def find_nearest_station(lat, lon):
     return min(stations, key=lambda s: geodesic((lat, lon), (stations[s]['lat'], stations[s]['lon'])).miles)
 
@@ -66,7 +65,7 @@ def get_forecast(lat, lon):
     data = []
     for i, time in enumerate(hourly["time"]):
         dt = datetime.fromisoformat(time).astimezone(central)
-        if dt > now and len(data) < 3:
+        if dt > now and len(data) < 12:
             data.append({
                 "time": dt.strftime("%a %I:%M %p"),
                 "temperature": hourly["temperature_2m"][i],
@@ -81,19 +80,16 @@ def get_forecast(lat, lon):
                 "cin": hourly["convective_inhibition"][i]
             })
 
-    cape_times = []
-    cape_values = []
-    for i, time in enumerate(hourly["time"][:12]):
-        dt = datetime.fromisoformat(time).astimezone(central)
-        cape_times.append(dt.strftime("%I %p"))
-        cape_values.append(hourly["cape"][i])
+    times = [datetime.fromisoformat(t).astimezone(central).strftime("%I %p") for t in hourly["time"][:12]]
+    cape_vals = hourly["cape"][:12]
+    cin_vals = hourly["convective_inhibition"][:12]
 
     daily = res["daily"]
     precip_24h = daily["precipitation_sum"][0]
     sunrise = datetime.fromisoformat(daily["sunrise"][0]).astimezone(central)
     sunset = datetime.fromisoformat(daily["sunset"][0]).astimezone(central)
 
-    return data, precip_24h, cape_times, cape_values, hourly["time"], sunrise, sunset
+    return data, precip_24h, times, cape_vals, cin_vals, hourly["time"], sunrise, sunset
 
 def calculate_risk(cape, forecast):
     score = 0
@@ -106,7 +102,6 @@ def calculate_risk(cape, forecast):
     elif forecast["precipitation"] >= 0.3: score += 10
     if forecast["humidity"] >= 80 and forecast["dewpoint"] >= 65: score += 10
     elif forecast["humidity"] >= 60 and forecast["dewpoint"] >= 60: score += 5
-
     cin = forecast["cin"]
     if cin <= -100:
         score -= 20
@@ -114,22 +109,23 @@ def calculate_risk(cape, forecast):
         score -= 10
     elif cin >= 0:
         score += 10
-
     return max(min(score, 100), 0)
 
 def set_background_theme(now, sunrise, sunset):
-    if now < sunrise - timedelta(minutes=60) or now > sunset + timedelta(minutes=60):
-        bg = "#000000"  # full night
-    elif sunrise - timedelta(minutes=60) <= now < sunrise:
-        bg = "#0b1a33"  # astronomical twilight
+    if now < sunrise - timedelta(minutes=90) or now > sunset + timedelta(minutes=90):
+        bg = "#000000"  # Night
+    elif sunrise - timedelta(minutes=90) <= now < sunrise - timedelta(minutes=30):
+        bg = "#1a1a2e"  # Astronomical Twilight
+    elif sunrise - timedelta(minutes=30) <= now < sunrise:
+        bg = "#2c3e50"  # Nautical Twilight
     elif sunrise <= now < sunrise + timedelta(minutes=30):
-        bg = "#ff914d"  # sunrise
+        bg = "#ff914d"  # Sunrise
     elif sunset - timedelta(minutes=30) <= now < sunset:
-        bg = "#ff914d"  # sunset
-    elif sunset <= now < sunset + timedelta(minutes=60):
-        bg = "#2f3542"  # nautical twilight
+        bg = "#ff914d"  # Sunset
+    elif sunset <= now < sunset + timedelta(minutes=30):
+        bg = "#2c3e50"  # Civil Twilight
     else:
-        bg = "#fff5cc"  # daylight
+        bg = "#fff8cc"  # Full Daylight
 
     st.markdown(
         f"""
@@ -162,29 +158,25 @@ if user_input:
 
     station = find_nearest_station(lat, lon)
     cape = get_rap_cape(station)
-    forecast_data, precip_24h, cape_times, cape_values, full_times, sunrise, sunset = get_forecast(lat, lon)
+    forecast_data, precip_24h, times, cape_vals, cin_vals, full_times, sunrise, sunset = get_forecast(lat, lon)
 
     now = datetime.now(pytz.timezone("US/Central"))
-    st.caption(f"**Local Time:** {now.strftime('%A %I:%M %p CT')}")
     set_background_theme(now, sunrise, sunset)
+    st.caption(f"**Local Time:** {now.strftime('%A %I:%M %p CT')}")
+    st.caption(f"**Sunrise:** {sunrise.strftime('%I:%M %p')} | **Sunset:** {sunset.strftime('%I:%M %p')}")
 
-    cape_source = None
-    if cape is not None:
-        cape_source = f"Real-Time RAP Sounding (Station: {station})"
-        cape_time = datetime.utcnow().strftime("%a %I:%M %p UTC")
-    else:
-        cape = forecast_data[0]["cape"]
-        cape_source = "Model Forecast CAPE (Open-Meteo Fallback)"
-        model_time = full_times[0]
-        cape_time = datetime.fromisoformat(model_time).astimezone(pytz.timezone("US/Central")).strftime("%a %I:%M %p CT")
+    cape_source = f"Real-Time RAP Sounding (Station: {station})" if cape else "Model Forecast CAPE (Open-Meteo Fallback)"
+    cape_time = datetime.utcnow().strftime("%a %I:%M %p UTC") if cape else datetime.fromisoformat(full_times[0]).astimezone(pytz.timezone("US/Central")).strftime("%a %I:%M %p CT")
+    cape = cape or forecast_data[0]["cape"]
 
     st.subheader(f"CAPE: {cape:.0f} J/kg")
     st.caption(f"Source: {cape_source}")
     st.caption(f"Updated: {cape_time}")
 
+    # CAPE Trend
     st.subheader("CAPE Trend (Next 12 Hours)")
     fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(cape_times, cape_values, marker="o")
+    ax.plot(times, cape_vals, marker="o", color="goldenrod")
     ax.set_ylabel("CAPE (J/kg)")
     ax.set_xlabel("Time (CT)")
     ax.set_title("Forecasted CAPE")
@@ -193,8 +185,20 @@ if user_input:
     plt.tight_layout()
     st.pyplot(fig)
 
-    st.subheader(f"24-Hour Precipitation: {precip_24h:.2f} in")
+    # CIN Trend
+    st.subheader("CIN Trend (Next 12 Hours)")
+    fig2, ax2 = plt.subplots(figsize=(10, 4))
+    ax2.plot(times, cin_vals, marker="o", color="purple")
+    ax2.set_ylabel("CIN (J/kg)")
+    ax2.set_xlabel("Time (CT)")
+    ax2.set_title("Forecasted CIN")
+    ax2.grid(True)
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    st.pyplot(fig2)
 
+    # Forecast Blocks
+    st.subheader(f"24-Hour Precipitation: {precip_24h:.2f} in")
     for hour in forecast_data:
         with st.container():
             st.markdown(f"### {hour['time']}")
@@ -215,6 +219,13 @@ if user_input:
                 st.metric("Risk Score", f"{risk}/100")
                 st.progress(risk / 100)
 
-            if hour["cin"] <= -100:
-                st.error("Strong Cap Present: Storms likely suppressed.")
+            # CIN messages
+            cin_val = hour["cin"]
+            if cin_val <= -100:
+                st.error("Strong Cap Present: Storms suppressed unless lifted.")
+            elif -100 < cin_val <= -50:
+                st.warning("Moderate Cap: May break with heating or lift.")
+            elif cin_val > -50:
+                st.success("Weak or No Cap: Storms more likely.")
+
             st.markdown("---")
