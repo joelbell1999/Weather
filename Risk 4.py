@@ -59,7 +59,7 @@ def get_forecast(lat, lon):
     )
     res = requests.get(url).json()
     hourly = res["hourly"]
-    now = datetime.now()
+    now = datetime.fromisoformat(forecast_data[0]["time"])
 
     data = []
     for i, time in enumerate(hourly["time"]):
@@ -159,7 +159,7 @@ if user_input:
     cape = get_rap_cape(station)
     forecast_data, precip_24h, times, cape_vals, cin_vals, full_times, sunrise, sunset = get_forecast(lat, lon)
 
-    now = datetime.now()
+    now = datetime.fromisoformat(forecast_data[0]["time"])
     set_background_theme(now, sunrise, sunset)
     st.caption(f"**Local Time:** {now.strftime('%A %I:%M %p')}")
     st.caption(f"**Sunrise:** {sunrise.strftime('%I:%M %p')} | **Sunset:** {sunset.strftime('%I:%M %p')}")
