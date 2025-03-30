@@ -229,3 +229,6 @@ if user_input:
                 st.success("Weak or No Cap: Storms more likely.")
 
             st.markdown("---")
+            st.caption(f"Sunrise Raw: {daily['sunrise'][0]}")
+st.caption(f"Sunset Raw: {daily['sunset'][0]}")
+            
