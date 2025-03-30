@@ -52,7 +52,8 @@ def get_forecast(lat, lon):
     url = (
         f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
         f"&hourly=temperature_2m,windspeed_10m,windgusts_10m,precipitation,precipitation_probability,"
-        f"cloudcover,dewpoint_2m,relative_humidity_2m,cape&daily=precipitation_sum&past_days=1&forecast_days=1"
+        f"cloudcover,dewpoint_2m,relative_humidity_2m,cape,convective_inhibition"
+        f"&daily=precipitation_sum&past_days=1&forecast_days=1"
         f"&temperature_unit=fahrenheit&windspeed_unit=mph&precipitation_unit=inch&timezone=auto"
     )
     res = requests.get(url).json()
@@ -74,7 +75,8 @@ def get_forecast(lat, lon):
                 "cloudCover": hourly["cloudcover"][i],
                 "dewpoint": hourly["dewpoint_2m"][i],
                 "humidity": hourly["relative_humidity_2m"][i],
-                "cape": hourly["cape"][i]
+                "cape": hourly["cape"][i],
+                "cin": hourly["convective_inhibition"][i]
             })
 
     cape_times = []
@@ -98,7 +100,15 @@ def calculate_risk(cape, forecast):
     elif forecast["precipitation"] >= 0.3: score += 10
     if forecast["humidity"] >= 80 and forecast["dewpoint"] >= 65: score += 10
     elif forecast["humidity"] >= 60 and forecast["dewpoint"] >= 60: score += 5
-    return min(score, 100)
+    # CIN scoring
+    cin = forecast["cin"]
+    if cin <= -100:
+        score -= 20
+    elif -100 < cin <= -50:
+        score -= 10
+    elif cin >= 0:
+        score += 10
+    return max(min(score, 100), 0)
 
 # --- Streamlit App ---
 st.set_page_config("Severe Weather Dashboard", layout="centered")
@@ -144,7 +154,7 @@ if user_input:
     ax.plot(cape_times, cape_values, marker="o")
     ax.set_ylabel("CAPE (J/kg)")
     ax.set_xlabel("Time (CT)")
-    ax.set_title("Forecast CAPE Trend")
+    ax.set_title("Forecasted CAPE")
     ax.grid(True)
     plt.xticks(rotation=45)
     plt.tight_layout()
@@ -160,5 +170,8 @@ if user_input:
         st.metric("Precip", f"{hour['precipitation']} in ({hour['precipProbability']}%)")
         st.metric("Cloud / Humidity", f"{hour['cloudCover']}% / {hour['humidity']}%")
         st.metric("Dewpoint", f"{hour['dewpoint']} °F")
+        st.metric("CIN", f"{hour['cin']:.0f} J/kg")
+        if hour["cin"] <= -100:
+            st.error("Strong Cap Present: Storms likely suppressed.")
         st.metric("Risk Score", f"{risk}/100")
         st.progress(risk / 100)
