@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from geopy.distance import geodesic
 from io import StringIO
 import matplotlib.pyplot as plt
@@ -59,9 +60,10 @@ def get_forecast(lat, lon):
     res = requests.get(url).json()
 
     if "hourly" not in res or "daily" not in res:
-        return None, None, None, None, None, None, None, None
+        return None, None, None, None, None, None, None, None, None
 
     hourly = res["hourly"]
+    timezone = res.get("timezone", "America/Chicago")
     data = []
     for i, time in enumerate(hourly["time"]):
         dt = datetime.fromisoformat(time)
@@ -87,7 +89,8 @@ def get_forecast(lat, lon):
     precip_24h = daily["precipitation_sum"][0]
     sunrise = datetime.fromisoformat(daily["sunrise"][0])
     sunset = datetime.fromisoformat(daily["sunset"][0])
-    return data, precip_24h, times, cape_vals, cin_vals, hourly["time"], sunrise, sunset
+
+    return data, precip_24h, times, cape_vals, cin_vals, hourly["time"], sunrise, sunset, timezone
 
 def calculate_risk(cape, forecast):
     score = 0
@@ -126,7 +129,7 @@ def set_background_theme(now, sunrise, sunset):
         bg = "#fff8cc"
     st.markdown(f"<style>.stApp {{ background-color: {bg}; }}</style>", unsafe_allow_html=True)
 
-# Streamlit app
+# Streamlit App
 st.set_page_config("Severe Weather Dashboard", layout="centered")
 st.title("Severe Weather Dashboard")
 user_input = st.text_input("Enter ZIP Code or City, State", "76247")
@@ -143,7 +146,6 @@ if user_input:
 
     st.markdown(f"**Location:** {label}")
     st.map({"lat": [lat], "lon": [lon]})
-
     station = find_nearest_station(lat, lon)
     cape = get_rap_cape(station)
 
@@ -152,11 +154,11 @@ if user_input:
         st.error("Failed to retrieve forecast data. Please try a different location.")
         st.stop()
 
-    forecast_data, precip_24h, times, cape_vals, cin_vals, full_times, sunrise, sunset = result
-    now = datetime.fromisoformat(full_times[0])
+    forecast_data, precip_24h, times, cape_vals, cin_vals, full_times, sunrise, sunset, timezone = result
+    now = datetime.fromisoformat(full_times[0]).replace(tzinfo=ZoneInfo(timezone))
     set_background_theme(now, sunrise, sunset)
 
-    st.caption(f"**Local Time (Forecast Location):** {now.strftime('%A %I:%M %p')}")
+    st.caption(f"**Local Time (Forecast Location):** {now.strftime('%A %I:%M %p')} ({timezone})")
     st.caption(f"**Sunrise:** {sunrise.strftime('%I:%M %p')} | **Sunset:** {sunset.strftime('%I:%M %p')}")
 
     cape_source = f"Real-Time RAP Sounding (Station: {station})" if cape else "Model Forecast CAPE (Open-Meteo Fallback)"
