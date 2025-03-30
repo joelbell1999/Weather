@@ -57,4 +57,59 @@ def get_weather_data(lat, lon):
             })
 
     precip_last_24hrs = response.get("daily", {}).get("precipitation_sum", [0])
-    precip_24h = precip_last_24hrs[0] if precip_last
+    precip_24h = precip_last_24hrs[0] if precip_last_24hrs else 0
+    return weather_data, precip_24h
+
+# Risk calculation logic
+def calculate_severe_risk(data):
+    score = 0
+    if data["cape"] >= 3000: score += 30
+    elif data["cape"] >= 2000: score += 20
+    elif data["cape"] >= 1000: score += 10
+    if data["windGusts"] >= 60: score += 25
+    elif data["windGusts"] >= 45: score += 15
+    if data["precipitation"] >= 1: score += 15
+    elif data["precipitation"] >= 0.3: score += 10
+    if data["humidity"] >= 80 and data["dewpoint"] >= 65: score += 10
+    elif data["humidity"] >= 60 and data["dewpoint"] >= 60: score += 5
+    return min(score, 100)
+
+# Streamlit UI
+st.set_page_config("Severe Weather Risk", layout="centered")
+st.title("DFW Severe Weather Risk Forecast")
+
+user_input = st.text_input("Enter ZIP Code or City, State", "76247")
+
+if user_input:
+    # Detect ZIP and convert to city if needed
+    if user_input.isnumeric() and len(user_input) == 5:
+        location_name = zip_to_city(user_input)
+        if not location_name:
+            st.warning("ZIP code not recognized. Using DFW fallback.")
+            location_name = "Dallas, TX"
+    else:
+        location_name = user_input
+
+    lat, lon, city = get_coordinates(location_name)
+    
+    if not lat or not lon:
+        st.warning("Could not find location. Defaulting to DFW.")
+        lat, lon, city = 32.9, -97.3, "DFW Metroplex"
+
+    st.markdown(f"**Location:** {city}")
+    st.map({"lat": [lat], "lon": [lon]})
+    weather_data, precip_24h = get_weather_data(lat, lon)
+
+    st.subheader(f"24-Hour Precipitation: {precip_24h:.2f} inches")
+
+    for period in weather_data:
+        risk = calculate_severe_risk(period)
+        st.markdown(f"### {period['time']}")
+        st.metric("Temperature", f"{period['temperature']} °F")
+        st.metric("Wind / Gusts", f"{period['windSpeed']} / {period['windGusts']} mph")
+        st.metric("Precipitation", f"{period['precipitation']} in ({period['precipProbability']}%)")
+        st.metric("Cloud / Humidity", f"{period['cloudCover']}% / {period['humidity']}%")
+        st.metric("Dewpoint", f"{period['dewpoint']} °F")
+        st.metric("CAPE", f"{period['cape']} J/kg")
+        st.progress(risk / 100)
+        st.write(f"**Severe Risk Score:** `{risk}/100`")
