@@ -1,8 +1,9 @@
+# This script should be saved as streamlit_app.py
+
 import streamlit as st
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
-import pytz
 from geopy.distance import geodesic
 from io import StringIO
 import matplotlib.pyplot as plt
@@ -59,12 +60,11 @@ def get_forecast(lat, lon):
     )
     res = requests.get(url).json()
     hourly = res["hourly"]
-    now = datetime.fromisoformat(forecast_data[0]["time"])
 
     data = []
     for i, time in enumerate(hourly["time"]):
         dt = datetime.fromisoformat(time)
-        if dt > now and len(data) < 12:
+        if dt > datetime.now() and len(data) < 12:
             data.append({
                 "time": dt.strftime("%a %I:%M %p"),
                 "temperature": hourly["temperature_2m"][i],
@@ -82,12 +82,10 @@ def get_forecast(lat, lon):
     times = [datetime.fromisoformat(t).strftime("%I %p") for t in hourly["time"][:12]]
     cape_vals = hourly["cape"][:12]
     cin_vals = hourly["convective_inhibition"][:12]
-
     daily = res["daily"]
     precip_24h = daily["precipitation_sum"][0]
     sunrise = datetime.fromisoformat(daily["sunrise"][0])
     sunset = datetime.fromisoformat(daily["sunset"][0])
-
     return data, precip_24h, times, cape_vals, cin_vals, hourly["time"], sunrise, sunset
 
 def calculate_risk(cape, forecast):
@@ -112,32 +110,22 @@ def calculate_risk(cape, forecast):
 
 def set_background_theme(now, sunrise, sunset):
     if now < sunrise - timedelta(minutes=90) or now > sunset + timedelta(minutes=90):
-        bg = "#000000"  # Night
+        bg = "#000000"
     elif sunrise - timedelta(minutes=90) <= now < sunrise - timedelta(minutes=30):
-        bg = "#1a1a2e"  # Astronomical Twilight
+        bg = "#1a1a2e"
     elif sunrise - timedelta(minutes=30) <= now < sunrise:
-        bg = "#2c3e50"  # Nautical Twilight
+        bg = "#2c3e50"
     elif sunrise <= now < sunrise + timedelta(minutes=30):
-        bg = "#ff914d"  # Sunrise
+        bg = "#ff914d"
     elif sunset - timedelta(minutes=30) <= now < sunset:
-        bg = "#ff914d"  # Sunset
+        bg = "#ff914d"
     elif sunset <= now < sunset + timedelta(minutes=30):
-        bg = "#2c3e50"  # Civil Twilight
+        bg = "#2c3e50"
     else:
-        bg = "#fff8cc"  # Full Daylight
+        bg = "#fff8cc"
+    st.markdown(f"<style>.stApp {{ background-color: {bg}; }}</style>", unsafe_allow_html=True)
 
-    st.markdown(
-        f"""
-        <style>
-        .stApp {{
-            background-color: {bg};
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-# --- Streamlit App ---
+# Streamlit app
 st.set_page_config("Severe Weather Dashboard", layout="centered")
 st.title("Severe Weather Dashboard")
 user_input = st.text_input("Enter ZIP Code or City, State", "76247")
@@ -154,18 +142,18 @@ if user_input:
 
     st.markdown(f"**Location:** {label}")
     st.map({"lat": [lat], "lon": [lon]})
-
     station = find_nearest_station(lat, lon)
     cape = get_rap_cape(station)
-    forecast_data, precip_24h, times, cape_vals, cin_vals, full_times, sunrise, sunset = get_forecast(lat, lon)
 
-    now = datetime.fromisoformat(forecast_data[0]["time"])
+    forecast_data, precip_24h, times, cape_vals, cin_vals, full_times, sunrise, sunset = get_forecast(lat, lon)
+    now = datetime.fromisoformat(full_times[0])  # FIXED local time
     set_background_theme(now, sunrise, sunset)
-    st.caption(f"**Local Time:** {now.strftime('%A %I:%M %p')}")
+
+    st.caption(f"**Local Time (Forecast Location):** {now.strftime('%A %I:%M %p')}")
     st.caption(f"**Sunrise:** {sunrise.strftime('%I:%M %p')} | **Sunset:** {sunset.strftime('%I:%M %p')}")
 
     cape_source = f"Real-Time RAP Sounding (Station: {station})" if cape else "Model Forecast CAPE (Open-Meteo Fallback)"
-    cape_time = datetime.utcnow().strftime("%a %I:%M %p UTC") if cape else datetime.fromisoformat(full_times[0]).strftime("%a %I:%M %p")
+    cape_time = datetime.utcnow().strftime("%a %I:%M %p UTC") if cape else now.strftime("%a %I:%M %p")
     cape = cape or forecast_data[0]["cape"]
 
     st.subheader(f"CAPE: {cape:.0f} J/kg")
@@ -199,16 +187,13 @@ if user_input:
         with st.container():
             st.markdown(f"### {hour['time']}")
             col1, col2, col3 = st.columns(3)
-
             with col1:
                 st.metric("Temp", f"{hour['temperature']} °F")
                 st.metric("Dewpoint", f"{hour['dewpoint']} °F")
                 st.metric("CIN", f"{hour['cin']:.0f} J/kg")
-
             with col2:
                 st.metric("Wind / Gusts", f"{hour['windSpeed']} / {hour['windGusts']} mph")
                 st.metric("Cloud / Humidity", f"{hour['cloudCover']}% / {hour['humidity']}%")
-
             with col3:
                 st.metric("Precip", f"{hour['precipitation']} in ({hour['precipProbability']}%)")
                 risk = calculate_risk(cape, hour)
