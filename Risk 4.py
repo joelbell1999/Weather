@@ -8,9 +8,9 @@ def get_coordinates(zip_code):
     geo_url = f"https://geocoding-api.open-meteo.com/v1/search?postal_code={zip_code}&country=US"
     res = requests.get(geo_url)
     data = res.json()
-    if "results" in data:
+    if "results" in data and len(data["results"]) > 0:
         result = data["results"][0]
-        return result["latitude"], result["longitude"], result["name"]
+        return result["latitude"], result["longitude"], result.get("name", "Unknown")
     return None, None, None
 
 # --- Fetch weather data from Open-Meteo API ---
@@ -50,7 +50,7 @@ def get_weather_data(lat, lon):
     precip_24h = precip_last_24hrs[0] if precip_last_24hrs else 0
     return weather_data, precip_24h
 
-# --- Severe risk calculation based on DFW thresholds ---
+# --- Severe risk calculation ---
 def calculate_severe_risk(data):
     score = 0
     if data["cape"] >= 3000: score += 30
@@ -76,23 +76,25 @@ zip_code = st.text_input("Enter ZIP Code", "76247")
 
 if zip_code:
     lat, lon, city = get_coordinates(zip_code)
-    if lat and lon:
-        st.markdown(f"**Location:** {city} ({zip_code})")
-        st.map({"lat": [lat], "lon": [lon]})
-        weather_data, precip_24h = get_weather_data(lat, lon)
+    
+    if not lat or not lon:
+        st.warning("Could not find location. Defaulting to DFW.")
+        lat, lon, city = 32.9, -97.3, "DFW Metroplex"
+    
+    st.markdown(f"**Location:** {city} ({zip_code})")
+    st.map({"lat": [lat], "lon": [lon]})
+    weather_data, precip_24h = get_weather_data(lat, lon)
 
-        st.subheader(f"24-Hour Precipitation: {precip_24h:.2f} inches")
+    st.subheader(f"24-Hour Precipitation: {precip_24h:.2f} inches")
 
-        for period in weather_data:
-            risk = calculate_severe_risk(period)
-            st.markdown(f"### {period['time']}")
-            st.metric("Temperature", f"{period['temperature']} °F")
-            st.metric("Wind / Gusts", f"{period['windSpeed']} / {period['windGusts']} mph")
-            st.metric("Precipitation", f"{period['precipitation']} in ({period['precipProbability']}%)")
-            st.metric("Cloud / Humidity", f"{period['cloudCover']}% / {period['humidity']}%")
-            st.metric("Dewpoint", f"{period['dewpoint']} °F")
-            st.metric("CAPE", f"{period['cape']} J/kg")
-            st.progress(risk / 100)
-            st.write(f"**Severe Risk Score:** `{risk}/100`")
-    else:
-        st.error("Could not find location for that ZIP code.")
+    for period in weather_data:
+        risk = calculate_severe_risk(period)
+        st.markdown(f"### {period['time']}")
+        st.metric("Temperature", f"{period['temperature']} °F")
+        st.metric("Wind / Gusts", f"{period['windSpeed']} / {period['windGusts']} mph")
+        st.metric("Precipitation", f"{period['precipitation']} in ({period['precipProbability']}%)")
+        st.metric("Cloud / Humidity", f"{period['cloudCover']}% / {period['humidity']}%")
+        st.metric("Dewpoint", f"{period['dewpoint']} °F")
+        st.metric("CAPE", f"{period['cape']} J/kg")
+        st.progress(risk / 100)
+        st.write(f"**Severe Risk Score:** `{risk}/100`")
