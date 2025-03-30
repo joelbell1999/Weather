@@ -109,3 +109,11 @@ if user_input:
         st.metric("CAPE", f"{period['cape']} J/kg")
         st.progress(risk / 100)
         st.write(f"**Severe Risk Score:** `{risk}/100`")
+
+    # Add live SPC SBCAPE map
+    st.subheader("Real-Time RAP SBCAPE (Surface-Based CAPE)")
+    st.image(
+        "https://www.spc.noaa.gov/exper/mesoanalysis/s13/sfc_sbcape.gif",
+        caption="Live SBCAPE from SPC Mesoanalysis (Updates Hourly)",
+        use_column_width=True
+    )
