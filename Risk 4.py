@@ -165,6 +165,7 @@ if user_input:
     forecast_data, precip_24h, cape_times, cape_values, full_times, sunrise, sunset = get_forecast(lat, lon)
 
     now = datetime.now(pytz.timezone("US/Central"))
+    st.caption(f"**Local Time:** {now.strftime('%A %I:%M %p CT')}")
     set_background_theme(now, sunrise, sunset)
 
     cape_source = None
