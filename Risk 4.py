@@ -236,7 +236,6 @@ for hour in forecast_data:
 
 # Show it to user
 import pandas as pd
-import ace_tools as tools
 tools.display_dataframe_to_user(
     name="streamlit_app.py (with shear map and all features)",
     dataframe=pd.DataFrame([{"file": "streamlit_app.py", "code": full_combined_code}])
