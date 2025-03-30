@@ -1,15 +1,17 @@
 import requests
 import streamlit as st
-from geopy.geocoders import Nominatim
 
 st.set_page_config(page_title="DFW Weather Risk", layout="centered")
 
-# Get coordinates from user-entered zip code
+# Get coordinates from ZIP using Open-Meteo's geocoding API
 def get_location_from_zip(zip_code):
-    geolocator = Nominatim(user_agent="weather-risk-app")
-    location = geolocator.geocode({"postalcode": zip_code, "country": "USA"})
-    if location:
-        return location.latitude, location.longitude, location.address
+    geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={zip_code}&count=1&language=en&format=json"
+    response = requests.get(geo_url)
+    if response.status_code == 200:
+        results = response.json().get("results", [])
+        if results:
+            location = results[0]
+            return location['latitude'], location['longitude'], location['name']
     return None, None, "Unknown"
 
 # Get precipitation over the last 24 hours
