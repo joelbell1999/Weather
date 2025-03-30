@@ -59,12 +59,11 @@ def get_forecast(lat, lon):
     )
     res = requests.get(url).json()
     hourly = res["hourly"]
-    central = pytz.timezone("US/Central")
-    now = datetime.now(central)
+    now = datetime.now()
 
     data = []
     for i, time in enumerate(hourly["time"]):
-        dt = datetime.fromisoformat(time).astimezone(central)
+        dt = datetime.fromisoformat(time)
         if dt > now and len(data) < 12:
             data.append({
                 "time": dt.strftime("%a %I:%M %p"),
@@ -80,14 +79,14 @@ def get_forecast(lat, lon):
                 "cin": hourly["convective_inhibition"][i]
             })
 
-    times = [datetime.fromisoformat(t).astimezone(central).strftime("%I %p") for t in hourly["time"][:12]]
+    times = [datetime.fromisoformat(t).strftime("%I %p") for t in hourly["time"][:12]]
     cape_vals = hourly["cape"][:12]
     cin_vals = hourly["convective_inhibition"][:12]
 
     daily = res["daily"]
     precip_24h = daily["precipitation_sum"][0]
-    sunrise = datetime.fromisoformat(daily["sunrise"][0]).astimezone(central)
-    sunset = datetime.fromisoformat(daily["sunset"][0]).astimezone(central)
+    sunrise = datetime.fromisoformat(daily["sunrise"][0])
+    sunset = datetime.fromisoformat(daily["sunset"][0])
 
     return data, precip_24h, times, cape_vals, cin_vals, hourly["time"], sunrise, sunset
 
@@ -160,44 +159,41 @@ if user_input:
     cape = get_rap_cape(station)
     forecast_data, precip_24h, times, cape_vals, cin_vals, full_times, sunrise, sunset = get_forecast(lat, lon)
 
-    now = datetime.now(pytz.timezone("US/Central"))
+    now = datetime.now()
     set_background_theme(now, sunrise, sunset)
-    st.caption(f"**Local Time:** {now.strftime('%A %I:%M %p CT')}")
+    st.caption(f"**Local Time:** {now.strftime('%A %I:%M %p')}")
     st.caption(f"**Sunrise:** {sunrise.strftime('%I:%M %p')} | **Sunset:** {sunset.strftime('%I:%M %p')}")
 
     cape_source = f"Real-Time RAP Sounding (Station: {station})" if cape else "Model Forecast CAPE (Open-Meteo Fallback)"
-    cape_time = datetime.utcnow().strftime("%a %I:%M %p UTC") if cape else datetime.fromisoformat(full_times[0]).astimezone(pytz.timezone("US/Central")).strftime("%a %I:%M %p CT")
+    cape_time = datetime.utcnow().strftime("%a %I:%M %p UTC") if cape else datetime.fromisoformat(full_times[0]).strftime("%a %I:%M %p")
     cape = cape or forecast_data[0]["cape"]
 
     st.subheader(f"CAPE: {cape:.0f} J/kg")
     st.caption(f"Source: {cape_source}")
     st.caption(f"Updated: {cape_time}")
 
-    # CAPE Trend
     st.subheader("CAPE Trend (Next 12 Hours)")
     fig, ax = plt.subplots(figsize=(10, 4))
     ax.plot(times, cape_vals, marker="o", color="goldenrod")
     ax.set_ylabel("CAPE (J/kg)")
-    ax.set_xlabel("Time (CT)")
+    ax.set_xlabel("Time")
     ax.set_title("Forecasted CAPE")
     ax.grid(True)
     plt.xticks(rotation=45)
     plt.tight_layout()
     st.pyplot(fig)
 
-    # CIN Trend
     st.subheader("CIN Trend (Next 12 Hours)")
     fig2, ax2 = plt.subplots(figsize=(10, 4))
     ax2.plot(times, cin_vals, marker="o", color="purple")
     ax2.set_ylabel("CIN (J/kg)")
-    ax2.set_xlabel("Time (CT)")
+    ax2.set_xlabel("Time")
     ax2.set_title("Forecasted CIN")
     ax2.grid(True)
     plt.xticks(rotation=45)
     plt.tight_layout()
     st.pyplot(fig2)
 
-    # Forecast Blocks
     st.subheader(f"24-Hour Precipitation: {precip_24h:.2f} in")
     for hour in forecast_data:
         with st.container():
@@ -219,7 +215,6 @@ if user_input:
                 st.metric("Risk Score", f"{risk}/100")
                 st.progress(risk / 100)
 
-            # CIN messages
             cin_val = hour["cin"]
             if cin_val <= -100:
                 st.error("Strong Cap Present: Storms suppressed unless lifted.")
@@ -229,6 +224,3 @@ if user_input:
                 st.success("Weak or No Cap: Storms more likely.")
 
             st.markdown("---")
-            st.caption(f"Sunrise Raw: {daily['sunrise'][0]}")
-st.caption(f"Sunset Raw: {daily['sunset'][0]}")
-            
