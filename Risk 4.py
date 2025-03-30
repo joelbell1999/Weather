@@ -1,123 +1,89 @@
-import requests
 import streamlit as st
+import requests
+from datetime import datetime
+import pytz
 
-st.set_page_config(page_title="DFW Weather Risk", layout="centered")
+def get_coordinates(zip_code):
+    geo_url = f"https://geocoding-api.open-meteo.com/v1/search?postal_code={zip_code}&country=US"
+    res = requests.get(geo_url)
+    data = res.json()
+    if "results" in data:
+        return data["results"][0]["latitude"], data["results"][0]["longitude"], data["results"][0]["name"]
+    else:
+        return None, None, None
 
-# Get coordinates from ZIP using Open-Meteo's geocoding API
-def get_location_from_zip(zip_code):
-    geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={zip_code}&count=1&language=en&format=json"
-    response = requests.get(geo_url)
-    if response.status_code == 200:
-        results = response.json().get("results", [])
-        if results:
-            location = results[0]
-            return location['latitude'], location['longitude'], location['name']
-    return None, None, "Unknown"
-
-# Get precipitation over the last 24 hours
-def get_precipitation_past_24hrs(lat, lon):
+def get_weather_data(lat, lon):
     url = (
         f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
-        f"&daily=precipitation_sum&past_days=1&forecast_days=0"
-        f"&precipitation_unit=inch&timezone=auto"
+        f"&hourly=temperature_2m,windspeed_10m,windgusts_10m,precipitation,precipitation_probability,"
+        f"cloudcover,dewpoint_2m,cape,relative_humidity_2m,surface_pressure,weathercode"
+        f"&daily=precipitation_sum&past_days=1&forecast_days=1"
+        f"&temperature_unit=fahrenheit&windspeed_unit=mph&precipitation_unit=inch&timezone=auto"
     )
-    response = requests.get(url)
-    if response.status_code == 200:
-        daily_data = response.json().get('daily', {})
-        precip_sums = daily_data.get('precipitation_sum', [0])
-        return precip_sums[-1]
-    return 0
 
-# Get current weather data
-def get_weather_data(lat, lon):
-    precip_last_24hrs = get_precipitation_past_24hrs(lat, lon)
+    response = requests.get(url).json()
+    hourly = response["hourly"]
+    times = hourly["time"]
+    central = pytz.timezone("US/Central")
+    now = datetime.now(central)
+
     weather_data = []
-
-    forecast_url = (
-        f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
-        f"&hourly=temperature_2m,windspeed_10m,windgusts_10m,weathercode,precipitation,precipitation_probability,cloudcover,dewpoint_2m,cape,relative_humidity_2m,surface_pressure"
-        f"&forecast_days=1&temperature_unit=fahrenheit&windspeed_unit=mph&precipitation_unit=inch&timezone=auto"
-    )
-
-    response = requests.get(forecast_url)
-    if response.status_code == 200:
-        data = response.json().get('hourly', {})
-        for i in range(3):
+    for i, time_str in enumerate(times):
+        dt = datetime.fromisoformat(time_str).astimezone(central)
+        if dt > now and len(weather_data) < 3:
             weather_data.append({
-                'time': data['time'][i],
-                'temperature': data['temperature_2m'][i],
-                'windSpeed': data['windspeed_10m'][i],
-                'windGusts': data['windgusts_10m'][i],
-                'weatherCode': data['weathercode'][i],
-                'precipitation': data['precipitation'][i],
-                'precipProbability': data['precipitation_probability'][i],
-                'cloudCover': data['cloudcover'][i],
-                'dewpoint': data['dewpoint_2m'][i],
-                'cape': data['cape'][i],
-                'humidity': data['relative_humidity_2m'][i],
-                'pressure': data['surface_pressure'][i]
+                "time": dt.strftime("%a %I:%M %p"),
+                "temperature": hourly["temperature_2m"][i],
+                "windSpeed": hourly["windspeed_10m"][i],
+                "windGusts": hourly["windgusts_10m"][i],
+                "precipitation": hourly["precipitation"][i],
+                "precipProbability": hourly["precipitation_probability"][i],
+                "cloudCover": hourly["cloudcover"][i],
+                "dewpoint": hourly["dewpoint_2m"][i],
+                "cape": hourly["cape"][i],
+                "humidity": hourly["relative_humidity_2m"][i]
             })
 
-    return weather_data, precip_last_24hrs
+    precip_last_24hrs = response.get("daily", {}).get("precipitation_sum", [None])
+    precip_24h = precip_last_24hrs[0] if precip_last_24hrs else 0
+    return weather_data, precip_24h
 
-# Calculate risk score
-def calculate_severe_risk(period):
-    risk = 0
-    if period['windSpeed'] >= 58 or period['windGusts'] >= 60:
-        risk += 30
-    elif period['windSpeed'] >= 40 or period['windGusts'] >= 50:
-        risk += 20
-    elif period['windSpeed'] >= 30 or period['windGusts'] >= 40:
-        risk += 10
+def calculate_severe_risk(data):
+    score = 0
+    if data["cape"] >= 3000: score += 30
+    elif data["cape"] >= 2000: score += 20
+    elif data["cape"] >= 1000: score += 10
+    if data["windGusts"] >= 60: score += 25
+    elif data["windGusts"] >= 45: score += 15
+    if data["precipitation"] >= 1: score += 15
+    elif data["precipitation"] >= 0.3: score += 10
+    if data["humidity"] >= 80 and data["dewpoint"] >= 65: score += 10
+    elif data["humidity"] >= 60 and data["dewpoint"] >= 60: score += 5
+    return min(score, 100)
 
-    if period['cape'] >= 3500:
-        risk += 30
-    elif period['cape'] >= 2500:
-        risk += 20
-    elif period['cape'] >= 1500:
-        risk += 10
+st.set_page_config("Severe Weather Risk", layout="centered")
+st.title("DFW Severe Weather Risk Forecast")
 
-    if period['precipProbability'] >= 70:
-        risk += 20
-    elif period['precipProbability'] >= 40:
-        risk += 10
+zip_code = st.text_input("Enter ZIP Code", "76247")
 
-    if period['cloudCover'] >= 85 and period['humidity'] >= 75:
-        risk += 10
-
-    if period['dewpoint'] >= 70:
-        risk += 10
-    elif period['dewpoint'] >= 65:
-        risk += 5
-
-    return min(risk, 100)
-
-# Streamlit UI
-st.title("DFW Severe Weather Risk")
-
-zip_code = st.text_input("Enter ZIP Code", value="76247")
 if zip_code:
-    lat, lon, location_name = get_location_from_zip(zip_code)
+    lat, lon, city = get_coordinates(zip_code)
     if lat and lon:
-        st.subheader(f"Location: {location_name}")
-        st.map(data={"lat": [lat], "lon": [lon]})
+        st.markdown(f"**Location:** {city} ({zip_code})")
+        st.map({"lat": [lat], "lon": [lon]})
+        weather_data, precip_24h = get_weather_data(lat, lon)
+        st.subheader(f"24-Hour Precipitation: {precip_24h:.2f} inches")
 
-        weather_data, precip_last_24hrs = get_weather_data(lat, lon)
-        st.subheader(f"Precipitation in Last 24 Hours: {precip_last_24hrs} inches")
-
-        if not weather_data:
-            st.error("Could not retrieve weather data.")
-        else:
-            for period in weather_data:
-                risk = calculate_severe_risk(period)
-                st.write(f"### Forecast for {period['time']}")
-                st.metric("Temperature", f"{period['temperature']} °F")
-                st.metric("Wind / Gusts", f"{period['windSpeed']} / {period['windGusts']} mph")
-                st.metric("Precipitation", f"{period['precipitation']} in ({period['precipProbability']}%)")
-                st.metric("Cloud / Humidity", f"{period['cloudCover']}% / {period['humidity']}%")
-                st.metric("Dewpoint", f"{period['dewpoint']} °F")
-                st.metric("CAPE", f"{period['cape']} J/kg")
-                st.progress(risk / 100)
-                st.write(f"**Severe Risk Factor:** {risk}/100")
+        for period in weather_data:
+            risk = calculate_severe_risk(period)
+            st.markdown(f"### {period['time']}")
+            st.metric("Temperature", f"{period['temperature']} °F")
+            st.metric("Wind / Gusts", f"{period['windSpeed']} / {period['windGusts']} mph")
+            st.metric("Precipitation", f"{period['precipitation']} in ({period['precipProbability']}%)")
+            st.metric("Cloud / Humidity", f"{period['cloudCover']}% / {period['humidity']}%")
+            st.metric("Dewpoint", f"{period['dewpoint']} °F")
+            st.metric("CAPE", f"{period['cape']} J/kg")
+            st.progress(risk / 100)
+            st.write(f"**Risk Score:** `{risk}/100`")
     else:
-        st.error("Could not determine location from ZIP code.")
+        st.error("Invalid ZIP code or location not found.")
