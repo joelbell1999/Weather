@@ -87,8 +87,8 @@ def get_forecast(lat, lon):
     cin_vals = hourly["convective_inhibition"][:12]
     daily = res["daily"]
     precip_24h = daily["precipitation_sum"][0]
-    sunrise = datetime.fromisoformat(daily["sunrise"][0])
-    sunset = datetime.fromisoformat(daily["sunset"][0])
+    sunrise = datetime.fromisoformat(daily["sunrise"][0]).replace(tzinfo=ZoneInfo(timezone))
+    sunset = datetime.fromisoformat(daily["sunset"][0]).replace(tzinfo=ZoneInfo(timezone))
 
     return data, precip_24h, times, cape_vals, cin_vals, hourly["time"], sunrise, sunset, timezone
 
