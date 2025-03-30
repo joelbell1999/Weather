@@ -116,3 +116,4 @@ if user_input:
         "https://www.spc.noaa.gov/exper/mesoanalysis/s13/sfc_sbcape.gif",
         caption="Live SBCAPE from SPC Mesoanalysis (Updates Hourly)",
         use_container_width=True
+        )
