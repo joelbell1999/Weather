@@ -87,8 +87,8 @@ def get_forecast(lat, lon):
     cin_vals = hourly["convective_inhibition"][:12]
     daily = res["daily"]
     precip_24h = daily["precipitation_sum"][0]
-    sunrise = datetime.fromisoformat(daily["sunrise"][0]).replace(tzinfo=ZoneInfo(timezone))
-    sunset = datetime.fromisoformat(daily["sunset"][0]).replace(tzinfo=ZoneInfo(timezone))
+    sunrise = datetime.fromisoformat(daily["sunrise"][0]).astimezone(ZoneInfo(timezone))
+    sunset = datetime.fromisoformat(daily["sunset"][0]).astimezone(ZoneInfo(timezone))
 
     return data, precip_24h, times, cape_vals, cin_vals, hourly["time"], sunrise, sunset, timezone
 
@@ -155,7 +155,7 @@ if user_input:
         st.stop()
 
     forecast_data, precip_24h, times, cape_vals, cin_vals, full_times, sunrise, sunset, timezone = result
-    now = datetime.fromisoformat(full_times[0]).replace(tzinfo=ZoneInfo(timezone))
+    now = datetime.fromisoformat(full_times[0]).astimezone(ZoneInfo(timezone))
     set_background_theme(now, sunrise, sunset)
 
     st.caption(f"**Local Time (Forecast Location):** {now.strftime('%A %I:%M %p')} ({timezone})")
