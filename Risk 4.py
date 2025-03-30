@@ -32,23 +32,6 @@ def get_rap_cape(station):
     df = pd.read_csv(StringIO(r.text))
     return df["cape"].dropna().iloc[-1] if "cape" in df.columns and not df["cape"].dropna().empty else None
 
-def zip_to_latlon(zip_code):
-    try:
-        r = requests.get(f"https://api.zippopotam.us/us/{zip_code}")
-        data = r.json()
-        place = data["places"][0]
-        return float(place["latitude"]), float(place["longitude"]), f"{place['place name']}, {place['state abbreviation']}"
-    except:
-        return None, None, None
-
-def city_to_latlon(city):
-    url = f"https://geocoding-api.open-meteo.com/v1/search?name={city}&country=US"
-    r = requests.get(url).json()
-    if "results" in r and r["results"]:
-        res = r["results"][0]
-        return res["latitude"], res["longitude"], res["name"]
-    return None, None, None
-
 def get_forecast(lat, lon):
     url = (
         f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
@@ -58,10 +41,8 @@ def get_forecast(lat, lon):
         f"&temperature_unit=fahrenheit&windspeed_unit=mph&precipitation_unit=inch&timezone=auto"
     )
     res = requests.get(url).json()
-
     if "hourly" not in res or "daily" not in res:
         return None, None, None, None, None, None, None, None, None
-
     hourly = res["hourly"]
     timezone = res.get("timezone", "America/Chicago")
     data = []
@@ -81,15 +62,13 @@ def get_forecast(lat, lon):
                 "cape": hourly["cape"][i],
                 "cin": hourly["convective_inhibition"][i]
             })
-
     times = [datetime.fromisoformat(t).strftime("%I %p") for t in hourly["time"][:12]]
     cape_vals = hourly["cape"][:12]
     cin_vals = hourly["convective_inhibition"][:12]
     daily = res["daily"]
     precip_24h = daily["precipitation_sum"][0]
-    sunrise = datetime.fromisoformat(daily["sunrise"][0]).astimezone(ZoneInfo(timezone))
-    sunset = datetime.fromisoformat(daily["sunset"][0]).astimezone(ZoneInfo(timezone))
-
+    sunrise = datetime.fromisoformat(daily["sunrise"][0])
+    sunset = datetime.fromisoformat(daily["sunset"][0])
     return data, precip_24h, times, cape_vals, cin_vals, hourly["time"], sunrise, sunset, timezone
 
 def calculate_risk(cape, forecast):
@@ -129,91 +108,124 @@ def set_background_theme(now, sunrise, sunset):
         bg = "#fff8cc"
     st.markdown(f"<style>.stApp {{ background-color: {bg}; }}</style>", unsafe_allow_html=True)
 
-# Streamlit App
+# Streamlit app
 st.set_page_config("Severe Weather Dashboard", layout="centered")
 st.title("Severe Weather Dashboard")
-user_input = st.text_input("Enter ZIP Code or City, State", "76247")
 
-if user_input:
+# Inject browser geolocation
+st.markdown("""
+<script>
+navigator.geolocation.getCurrentPosition(
+  (loc) => {
+    const coords = `${loc.coords.latitude},${loc.coords.longitude}`;
+    window.parent.postMessage({type: 'streamlit:setComponentValue', value: coords}, "*");
+  },
+  (err) => {
+    window.parent.postMessage({type: 'streamlit:setComponentValue', value: 'geo_failed'}, "*");
+  }
+);
+</script>
+""", unsafe_allow_html=True)
+
+location_coords = st.experimental_get_query_params().get("geolocation", [None])[0]
+
+if location_coords and location_coords != "geo_failed":
+    lat, lon = map(float, location_coords.split(","))
+    label = "Detected Location (via Browser)"
+else:
+    user_input = st.text_input("Enter ZIP Code or City, State", "76247")
     if user_input.isnumeric():
-        lat, lon, label = zip_to_latlon(user_input)
+        r = requests.get(f"https://api.zippopotam.us/us/{user_input}")
+        data = r.json()
+        place = data["places"][0]
+        lat, lon = float(place["latitude"]), float(place["longitude"])
+        label = f"{place['place name']}, {place['state abbreviation']}"
     else:
-        lat, lon, label = city_to_latlon(user_input)
+        url = f"https://geocoding-api.open-meteo.com/v1/search?name={user_input}&country=US"
+        r = requests.get(url).json()
+        if "results" in r and r["results"]:
+            res = r["results"][0]
+            lat, lon, label = res["latitude"], res["longitude"], res["name"]
+        else:
+            lat, lon, label = 32.9, -97.3, "DFW Metroplex"
+            st.warning("Could not find location. Defaulting to DFW.")
 
-    if not lat or not lon:
-        lat, lon, label = 32.9, -97.3, "DFW Metroplex"
-        st.warning("Could not find location. Defaulting to DFW.")
+st.markdown(f"**Location:** {label}")
+st.map({"lat": [lat], "lon": [lon]})
 
-    st.markdown(f"**Location:** {label}")
-    st.map({"lat": [lat], "lon": [lon]})
-    station = find_nearest_station(lat, lon)
-    cape = get_rap_cape(station)
+station = find_nearest_station(lat, lon)
+cape = get_rap_cape(station)
 
-    result = get_forecast(lat, lon)
-    if result[0] is None:
-        st.error("Failed to retrieve forecast data. Please try a different location.")
-        st.stop()
+result = get_forecast(lat, lon)
+if result[0] is None:
+    st.error("Failed to retrieve forecast data. Please try a different location.")
+    st.stop()
 
-    forecast_data, precip_24h, times, cape_vals, cin_vals, full_times, sunrise, sunset, timezone = result
-    now = datetime.fromisoformat(full_times[0]).astimezone(ZoneInfo(timezone))
-    set_background_theme(now, sunrise, sunset)
+forecast_data, precip_24h, times, cape_vals, cin_vals, full_times, sunrise, sunset, timezone = result
 
-    st.caption(f"**Local Time (Forecast Location):** {now.strftime('%A %I:%M %p')} ({timezone})")
-    st.caption(f"**Sunrise:** {sunrise.strftime('%I:%M %p')} | **Sunset:** {sunset.strftime('%I:%M %p')}")
+now = datetime.fromisoformat(full_times[0]).replace(tzinfo=ZoneInfo(timezone))
+sunrise = sunrise.replace(tzinfo=ZoneInfo(timezone))
+sunset = sunset.replace(tzinfo=ZoneInfo(timezone))
 
-    cape_source = f"Real-Time RAP Sounding (Station: {station})" if cape else "Model Forecast CAPE (Open-Meteo Fallback)"
-    cape_time = datetime.utcnow().strftime("%a %I:%M %p UTC") if cape else now.strftime("%a %I:%M %p")
-    cape = cape or forecast_data[0]["cape"]
+set_background_theme(now, sunrise, sunset)
 
-    st.subheader(f"CAPE: {cape:.0f} J/kg")
-    st.caption(f"Source: {cape_source}")
-    st.caption(f"Updated: {cape_time}")
+st.caption(f"**Local Time (Forecast Location):** {now.strftime('%A %I:%M %p')} ({timezone})")
+st.caption(f"**Sunrise:** {sunrise.strftime('%I:%M %p')} | **Sunset:** {sunset.strftime('%I:%M %p')}")
 
-    st.subheader("CAPE Trend (Next 12 Hours)")
-    fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(times, cape_vals, marker="o", color="goldenrod")
-    ax.set_ylabel("CAPE (J/kg)")
-    ax.set_xlabel("Time")
-    ax.set_title("Forecasted CAPE")
-    ax.grid(True)
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    st.pyplot(fig)
+cape_source = f"Real-Time RAP Sounding (Station: {station})" if cape else "Model Forecast CAPE (Open-Meteo Fallback)"
+cape_time = datetime.utcnow().strftime("%a %I:%M %p UTC") if cape else now.strftime("%a %I:%M %p")
+cape = cape or forecast_data[0]["cape"]
 
-    st.subheader("CIN Trend (Next 12 Hours)")
-    fig2, ax2 = plt.subplots(figsize=(10, 4))
-    ax2.plot(times, cin_vals, marker="o", color="purple")
-    ax2.set_ylabel("CIN (J/kg)")
-    ax2.set_xlabel("Time")
-    ax2.set_title("Forecasted CIN")
-    ax2.grid(True)
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    st.pyplot(fig2)
+st.subheader(f"CAPE: {cape:.0f} J/kg")
+st.caption(f"Source: {cape_source}")
+st.caption(f"Updated: {cape_time}")
 
-    st.subheader(f"24-Hour Precipitation: {precip_24h:.2f} in")
-    for hour in forecast_data:
-        with st.container():
-            st.markdown(f"### {hour['time']}")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Temp", f"{hour['temperature']} °F")
-                st.metric("Dewpoint", f"{hour['dewpoint']} °F")
-                st.metric("CIN", f"{hour['cin']:.0f} J/kg")
-            with col2:
-                st.metric("Wind / Gusts", f"{hour['windSpeed']} / {hour['windGusts']} mph")
-                st.metric("Cloud / Humidity", f"{hour['cloudCover']}% / {hour['humidity']}%")
-            with col3:
-                st.metric("Precip", f"{hour['precipitation']} in ({hour['precipProbability']}%)")
-                risk = calculate_risk(cape, hour)
-                st.metric("Risk Score", f"{risk}/100")
-                st.progress(risk / 100)
+# CAPE Chart
+st.subheader("CAPE Trend (Next 12 Hours)")
+fig, ax = plt.subplots(figsize=(10, 4))
+ax.plot(times, cape_vals, marker="o", color="goldenrod")
+ax.set_ylabel("CAPE (J/kg)")
+ax.set_xlabel("Time")
+ax.set_title("Forecasted CAPE")
+ax.grid(True)
+plt.xticks(rotation=45)
+plt.tight_layout()
+st.pyplot(fig)
 
-            cin_val = hour["cin"]
-            if cin_val <= -100:
-                st.error("Strong Cap Present: Storms suppressed unless lifted.")
-            elif -100 < cin_val <= -50:
-                st.warning("Moderate Cap: May break with heating or lift.")
-            elif cin_val > -50:
-                st.success("Weak or No Cap: Storms more likely.")
-            st.markdown("---")
+# CIN Chart
+st.subheader("CIN Trend (Next 12 Hours)")
+fig2, ax2 = plt.subplots(figsize=(10, 4))
+ax2.plot(times, cin_vals, marker="o", color="purple")
+ax2.set_ylabel("CIN (J/kg)")
+ax2.set_xlabel("Time")
+ax2.set_title("Forecasted CIN")
+ax2.grid(True)
+plt.xticks(rotation=45)
+plt.tight_layout()
+st.pyplot(fig2)
+
+st.subheader(f"24-Hour Precipitation: {precip_24h:.2f} in")
+for hour in forecast_data:
+    with st.container():
+        st.markdown(f"### {hour['time']}")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Temp", f"{hour['temperature']} °F")
+            st.metric("Dewpoint", f"{hour['dewpoint']} °F")
+            st.metric("CIN", f"{hour['cin']:.0f} J/kg")
+        with col2:
+            st.metric("Wind / Gusts", f"{hour['windSpeed']} / {hour['windGusts']} mph")
+            st.metric("Cloud / Humidity", f"{hour['cloudCover']}% / {hour['humidity']}%")
+        with col3:
+            st.metric("Precip", f"{hour['precipitation']} in ({hour['precipProbability']}%)")
+            risk = calculate_risk(cape, hour)
+            st.metric("Risk Score", f"{risk}/100")
+            st.progress(risk / 100)
+        cin_val = hour["cin"]
+        if cin_val <= -100:
+            st.error("Strong Cap Present: Storms suppressed unless lifted.")
+        elif -100 < cin_val <= -50:
+            st.warning("Moderate Cap: May break with heating or lift.")
+        elif cin_val > -50:
+            st.success("Weak or No Cap: Storms more likely.")
+        st.markdown("---")
