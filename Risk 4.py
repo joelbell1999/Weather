@@ -1,5 +1,9 @@
 import requests
+import streamlit as st
 
+st.set_page_config(page_title="DFW Weather Risk", layout="centered")
+
+# Get current location from IP
 def get_current_location():
     ipinfo_response = requests.get('https://ipinfo.io/json')
     if ipinfo_response.status_code != 200:
@@ -8,6 +12,7 @@ def get_current_location():
     lat, lon = location_data['loc'].split(',')
     return float(lat), float(lon)
 
+# Get precipitation over the last 24 hours
 def get_precipitation_past_24hrs(lat, lon):
     url = (
         f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
@@ -21,60 +26,46 @@ def get_precipitation_past_24hrs(lat, lon):
         return precip_sums[-1]
     return 0
 
+# Get current weather data
 def get_weather_data():
     location = get_current_location()
     if not location:
-        return None
+        return [], 0
 
     lat, lon = location
     precip_last_24hrs = get_precipitation_past_24hrs(lat, lon)
     weather_data = []
 
-    # Open-Meteo API for current forecast
-    open_meteo_url = (
+    forecast_url = (
         f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
         f"&hourly=temperature_2m,windspeed_10m,windgusts_10m,weathercode,precipitation,precipitation_probability,cloudcover,dewpoint_2m,cape,relative_humidity_2m,surface_pressure"
         f"&forecast_days=1&temperature_unit=fahrenheit&windspeed_unit=mph&precipitation_unit=inch&timezone=auto"
     )
 
-    open_meteo_response = requests.get(open_meteo_url)
-
-    if open_meteo_response.status_code == 200:
-        open_meteo_hourly = open_meteo_response.json().get('hourly', {})
-        times = open_meteo_hourly.get('time', [])
-        temperatures = open_meteo_hourly.get('temperature_2m', [])
-        wind_speeds = open_meteo_hourly.get('windspeed_10m', [])
-        wind_gusts = open_meteo_hourly.get('windgusts_10m', [])
-        weather_codes = open_meteo_hourly.get('weathercode', [])
-        precipitations = open_meteo_hourly.get('precipitation', [])
-        precip_probs = open_meteo_hourly.get('precipitation_probability', [])
-        cloud_covers = open_meteo_hourly.get('cloudcover', [])
-        dewpoints = open_meteo_hourly.get('dewpoint_2m', [])
-        capes = open_meteo_hourly.get('cape', [])
-        humidities = open_meteo_hourly.get('relative_humidity_2m', [])
-        pressures = open_meteo_hourly.get('surface_pressure', [])
-
-        for i in range(3):  # Next 3 hours
+    response = requests.get(forecast_url)
+    if response.status_code == 200:
+        data = response.json().get('hourly', {})
+        for i in range(3):
             weather_data.append({
-                'time': times[i],
-                'temperature': temperatures[i],
-                'windSpeed': wind_speeds[i],
-                'windGusts': wind_gusts[i],
-                'weatherCode': weather_codes[i],
-                'precipitation': precipitations[i],
-                'precipProbability': precip_probs[i],
-                'cloudCover': cloud_covers[i],
-                'dewpoint': dewpoints[i],
-                'cape': capes[i],
-                'humidity': humidities[i],
-                'pressure': pressures[i]
+                'time': data['time'][i],
+                'temperature': data['temperature_2m'][i],
+                'windSpeed': data['windspeed_10m'][i],
+                'windGusts': data['windgusts_10m'][i],
+                'weatherCode': data['weathercode'][i],
+                'precipitation': data['precipitation'][i],
+                'precipProbability': data['precipitation_probability'][i],
+                'cloudCover': data['cloudcover'][i],
+                'dewpoint': data['dewpoint_2m'][i],
+                'cape': data['cape'][i],
+                'humidity': data['relative_humidity_2m'][i],
+                'pressure': data['surface_pressure'][i]
             })
 
     return weather_data, precip_last_24hrs
 
+# Calculate risk score
 def calculate_severe_risk(period):
     risk = 0
-
     if period['windSpeed'] >= 58 or period['windGusts'] >= 60:
         risk += 30
     elif period['windSpeed'] >= 40 or period['windGusts'] >= 50:
@@ -82,12 +73,11 @@ def calculate_severe_risk(period):
     elif period['windSpeed'] >= 30 or period['windGusts'] >= 40:
         risk += 10
 
-    cape = period['cape']
-    if cape >= 3500:
+    if period['cape'] >= 3500:
         risk += 30
-    elif cape >= 2500:
+    elif period['cape'] >= 2500:
         risk += 20
-    elif cape >= 1500:
+    elif period['cape'] >= 1500:
         risk += 10
 
     if period['precipProbability'] >= 70:
@@ -105,18 +95,24 @@ def calculate_severe_risk(period):
 
     return min(risk, 100)
 
-# Example execution
+# Streamlit UI
+st.title("DFW Severe Weather Risk")
+
 weather_data, precip_last_24hrs = get_weather_data()
 
-print(f"Precipitation in Last 24 Hours: {precip_last_24hrs} inches\n")
-print("DFW Area Comprehensive Weather Data and Severe Risk Factor (Next 3 hours):")
-for period in weather_data:
-    risk = calculate_severe_risk(period)
-    st.write(f"Time: {period['time']}")
-    st.write(f"Temperature: {period['temperature']} °F")
-    st.write(f"Wind Speed: {period['windSpeed']} mph, Gusts: {period['windGusts']} mph")
-    st.write(f"Weather Code: {period['weatherCode']}")
-    st.write(f"Precipitation: {period['precipitation']} inches, Probability: {period['precipProbability']}%")
-    st.write(f"Cloud Cover: {period['cloudCover']}%, Humidity: {period['humidity']}%, Dewpoint: {period['dewpoint']} °F")
-    st.write(f"CAPE: {period['cape']} J/kg, Pressure: {period['pressure']} hPa")
-    st.write(f"Severe Risk Factor: {risk}/100\n")
+st.subheader(f"Precipitation in Last 24 Hours: {precip_last_24hrs} inches")
+
+if not weather_data:
+    st.error("Could not retrieve weather data.")
+else:
+    for period in weather_data:
+        risk = calculate_severe_risk(period)
+        st.write(f"### Forecast for {period['time']}")
+        st.metric("Temperature", f"{period['temperature']} °F")
+        st.metric("Wind / Gusts", f"{period['windSpeed']} / {period['windGusts']} mph")
+        st.metric("Precipitation", f"{period['precipitation']} in ({period['precipProbability']}%)")
+        st.metric("Cloud / Humidity", f"{period['cloudCover']}% / {period['humidity']}%")
+        st.metric("Dewpoint", f"{period['dewpoint']} °F")
+        st.metric("CAPE", f"{period['cape']} J/kg")
+        st.progress(risk / 100)
+        st.write(f"**Severe Risk Factor:** {risk}/100")
