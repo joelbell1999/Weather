@@ -1,12 +1,13 @@
 import streamlit as st
 import requests
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 from geopy.distance import geodesic
 from io import StringIO
 import matplotlib.pyplot as plt
 
+# Sounding stations
 stations = {
     "KOUN": {"lat": 35.23, "lon": -97.46},
     "KFWD": {"lat": 32.83, "lon": -97.30},
@@ -15,6 +16,7 @@ stations = {
     "KSHV": {"lat": 32.45, "lon": -93.83}
 }
 
+# --- Helpers ---
 def find_nearest_station(lat, lon):
     return min(stations, key=lambda s: geodesic((lat, lon), (stations[s]['lat'], stations[s]['lon'])).miles)
 
@@ -53,7 +55,7 @@ def get_forecast(lat, lon):
         f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
         f"&hourly=temperature_2m,windspeed_10m,windgusts_10m,precipitation,precipitation_probability,"
         f"cloudcover,dewpoint_2m,relative_humidity_2m,cape,convective_inhibition"
-        f"&daily=precipitation_sum&past_days=1&forecast_days=1"
+        f"&daily=precipitation_sum,sunrise,sunset&past_days=1&forecast_days=1"
         f"&temperature_unit=fahrenheit&windspeed_unit=mph&precipitation_unit=inch&timezone=auto"
     )
     res = requests.get(url).json()
@@ -86,8 +88,12 @@ def get_forecast(lat, lon):
         cape_times.append(dt.strftime("%I %p"))
         cape_values.append(hourly["cape"][i])
 
-    daily_precip = res.get("daily", {}).get("precipitation_sum", [0])[0]
-    return data, daily_precip, cape_times, cape_values, hourly["time"]
+    daily = res["daily"]
+    precip_24h = daily["precipitation_sum"][0]
+    sunrise = datetime.fromisoformat(daily["sunrise"][0]).astimezone(central)
+    sunset = datetime.fromisoformat(daily["sunset"][0]).astimezone(central)
+
+    return data, precip_24h, cape_times, cape_values, hourly["time"], sunrise, sunset
 
 def calculate_risk(cape, forecast):
     score = 0
@@ -100,7 +106,7 @@ def calculate_risk(cape, forecast):
     elif forecast["precipitation"] >= 0.3: score += 10
     if forecast["humidity"] >= 80 and forecast["dewpoint"] >= 65: score += 10
     elif forecast["humidity"] >= 60 and forecast["dewpoint"] >= 60: score += 5
-    # CIN scoring
+
     cin = forecast["cin"]
     if cin <= -100:
         score -= 20
@@ -108,7 +114,33 @@ def calculate_risk(cape, forecast):
         score -= 10
     elif cin >= 0:
         score += 10
+
     return max(min(score, 100), 0)
+
+def set_background_theme(now, sunrise, sunset):
+    if now < sunrise - timedelta(minutes=60) or now > sunset + timedelta(minutes=60):
+        bg = "#000000"  # full night
+    elif sunrise - timedelta(minutes=60) <= now < sunrise:
+        bg = "#0b1a33"  # astronomical twilight
+    elif sunrise <= now < sunrise + timedelta(minutes=30):
+        bg = "#ff914d"  # sunrise
+    elif sunset - timedelta(minutes=30) <= now < sunset:
+        bg = "#ff914d"  # sunset
+    elif sunset <= now < sunset + timedelta(minutes=60):
+        bg = "#2f3542"  # nautical twilight
+    else:
+        bg = "#fff5cc"  # daylight
+
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            background-color: {bg};
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 # --- Streamlit App ---
 st.set_page_config("Severe Weather Dashboard", layout="centered")
@@ -130,11 +162,12 @@ if user_input:
 
     station = find_nearest_station(lat, lon)
     cape = get_rap_cape(station)
+    forecast_data, precip_24h, cape_times, cape_values, full_times, sunrise, sunset = get_forecast(lat, lon)
+
+    now = datetime.now(pytz.timezone("US/Central"))
+    set_background_theme(now, sunrise, sunset)
+
     cape_source = None
-    cape_time = None
-
-    forecast_data, precip_24h, cape_times, cape_values, full_times = get_forecast(lat, lon)
-
     if cape is not None:
         cape_source = f"Real-Time RAP Sounding (Station: {station})"
         cape_time = datetime.utcnow().strftime("%a %I:%M %p UTC")
@@ -148,7 +181,6 @@ if user_input:
     st.caption(f"Source: {cape_source}")
     st.caption(f"Updated: {cape_time}")
 
-    # --- CAPE Trend Chart ---
     st.subheader("CAPE Trend (Next 12 Hours)")
     fig, ax = plt.subplots(figsize=(10, 4))
     ax.plot(cape_times, cape_values, marker="o")
@@ -160,18 +192,28 @@ if user_input:
     plt.tight_layout()
     st.pyplot(fig)
 
-    # --- Forecast + Risk Score ---
     st.subheader(f"24-Hour Precipitation: {precip_24h:.2f} in")
+
     for hour in forecast_data:
-        risk = calculate_risk(cape, hour)
-        st.markdown(f"### {hour['time']}")
-        st.metric("Temp", f"{hour['temperature']} °F")
-        st.metric("Wind / Gusts", f"{hour['windSpeed']} / {hour['windGusts']} mph")
-        st.metric("Precip", f"{hour['precipitation']} in ({hour['precipProbability']}%)")
-        st.metric("Cloud / Humidity", f"{hour['cloudCover']}% / {hour['humidity']}%")
-        st.metric("Dewpoint", f"{hour['dewpoint']} °F")
-        st.metric("CIN", f"{hour['cin']:.0f} J/kg")
-        if hour["cin"] <= -100:
-            st.error("Strong Cap Present: Storms likely suppressed.")
-        st.metric("Risk Score", f"{risk}/100")
-        st.progress(risk / 100)
+        with st.container():
+            st.markdown(f"### {hour['time']}")
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                st.metric("Temp", f"{hour['temperature']} °F")
+                st.metric("Dewpoint", f"{hour['dewpoint']} °F")
+                st.metric("CIN", f"{hour['cin']:.0f} J/kg")
+
+            with col2:
+                st.metric("Wind / Gusts", f"{hour['windSpeed']} / {hour['windGusts']} mph")
+                st.metric("Cloud / Humidity", f"{hour['cloudCover']}% / {hour['humidity']}%")
+
+            with col3:
+                st.metric("Precip", f"{hour['precipitation']} in ({hour['precipProbability']}%)")
+                risk = calculate_risk(cape, hour)
+                st.metric("Risk Score", f"{risk}/100")
+                st.progress(risk / 100)
+
+            if hour["cin"] <= -100:
+                st.error("Strong Cap Present: Storms likely suppressed.")
+            st.markdown("---")
