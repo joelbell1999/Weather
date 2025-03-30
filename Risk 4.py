@@ -1,3 +1,7 @@
+# Combining the full app with CAPE/CIN, risk score logic, background theme,
+# browser geolocation, and real-time Pivotal shear map display.
+
+full_combined_code = """
 import streamlit as st
 import requests
 import pandas as pd
@@ -7,7 +11,50 @@ from geopy.distance import geodesic
 from io import StringIO
 import matplotlib.pyplot as plt
 
-# Sounding stations
+st.set_page_config("Severe Weather Dashboard", layout="centered")
+st.title("Severe Weather Dashboard")
+
+# Browser geolocation injection
+st.markdown(\"\"\"
+<script>
+navigator.geolocation.getCurrentPosition(
+  (loc) => {
+    const coords = `${loc.coords.latitude},${loc.coords.longitude}`;
+    window.parent.postMessage({type: 'streamlit:setComponentValue', value: coords}, "*");
+  },
+  (err) => {
+    window.parent.postMessage({type: 'streamlit:setComponentValue', value: 'geo_failed'}, "*");
+  }
+);
+</script>
+\"\"\", unsafe_allow_html=True)
+
+location_coords = st.experimental_get_query_params().get("geolocation", [None])[0]
+
+if location_coords and location_coords != "geo_failed":
+    lat, lon = map(float, location_coords.split(","))
+    label = "Detected Location (via Browser)"
+else:
+    user_input = st.text_input("Enter ZIP Code or City, State", "76247")
+    if user_input.isnumeric():
+        r = requests.get(f"https://api.zippopotam.us/us/{user_input}")
+        data = r.json()
+        place = data["places"][0]
+        lat, lon = float(place["latitude"]), float(place["longitude"])
+        label = f"{place['place name']}, {place['state abbreviation']}"
+    else:
+        url = f"https://geocoding-api.open-meteo.com/v1/search?name={user_input}&country=US"
+        r = requests.get(url).json()
+        if "results" in r and r["results"]:
+            res = r["results"][0]
+            lat, lon, label = res["latitude"], res["longitude"], res["name"]
+        else:
+            lat, lon, label = 32.9, -97.3, "DFW Metroplex"
+            st.warning("Could not find location. Defaulting to DFW.")
+
+st.markdown(f"**Location:** {label}")
+st.map({"lat": [lat], "lon": [lon]})
+
 stations = {
     "KOUN": {"lat": 35.23, "lon": -97.46},
     "KFWD": {"lat": 32.83, "lon": -97.30},
@@ -108,102 +155,58 @@ def set_background_theme(now, sunrise, sunset):
         bg = "#fff8cc"
     st.markdown(f"<style>.stApp {{ background-color: {bg}; }}</style>", unsafe_allow_html=True)
 
-# Streamlit app
-st.set_page_config("Severe Weather Dashboard", layout="centered")
-st.title("Severe Weather Dashboard")
-
-# Inject browser geolocation
-st.markdown("""
-<script>
-navigator.geolocation.getCurrentPosition(
-  (loc) => {
-    const coords = `${loc.coords.latitude},${loc.coords.longitude}`;
-    window.parent.postMessage({type: 'streamlit:setComponentValue', value: coords}, "*");
-  },
-  (err) => {
-    window.parent.postMessage({type: 'streamlit:setComponentValue', value: 'geo_failed'}, "*");
-  }
-);
-</script>
-""", unsafe_allow_html=True)
-
-location_coords = st.query_params.get("geolocation", [None])[0]
-
-if location_coords and location_coords != "geo_failed":
-    lat, lon = map(float, location_coords.split(","))
-    label = "Detected Location (via Browser)"
-else:
-    user_input = st.text_input("Enter ZIP Code or City, State", "76247")
-    if user_input.isnumeric():
-        r = requests.get(f"https://api.zippopotam.us/us/{user_input}")
-        data = r.json()
-        place = data["places"][0]
-        lat, lon = float(place["latitude"]), float(place["longitude"])
-        label = f"{place['place name']}, {place['state abbreviation']}"
-    else:
-        url = f"https://geocoding-api.open-meteo.com/v1/search?name={user_input}&country=US"
-        r = requests.get(url).json()
-        if "results" in r and r["results"]:
-            res = r["results"][0]
-            lat, lon, label = res["latitude"], res["longitude"], res["name"]
-        else:
-            lat, lon, label = 32.9, -97.3, "DFW Metroplex"
-            st.warning("Could not find location. Defaulting to DFW.")
-
-st.markdown(f"**Location:** {label}")
-st.map({"lat": [lat], "lon": [lon]})
-
 station = find_nearest_station(lat, lon)
 cape = get_rap_cape(station)
-
 result = get_forecast(lat, lon)
 if result[0] is None:
-    st.error("Failed to retrieve forecast data. Please try a different location.")
+    st.error("Failed to retrieve forecast data.")
     st.stop()
 
 forecast_data, precip_24h, times, cape_vals, cin_vals, full_times, sunrise, sunset, timezone = result
-
 now = datetime.fromisoformat(full_times[0]).replace(tzinfo=ZoneInfo(timezone))
 sunrise = sunrise.replace(tzinfo=ZoneInfo(timezone))
 sunset = sunset.replace(tzinfo=ZoneInfo(timezone))
-
 set_background_theme(now, sunrise, sunset)
 
 st.caption(f"**Local Time (Forecast Location):** {now.strftime('%A %I:%M %p')} ({timezone})")
 st.caption(f"**Sunrise:** {sunrise.strftime('%I:%M %p')} | **Sunset:** {sunset.strftime('%I:%M %p')}")
 
-cape_source = f"Real-Time RAP Sounding (Station: {station})" if cape else "Model Forecast CAPE (Open-Meteo Fallback)"
+# CAPE Section
+cape_source = f"RAP Sounding (Station: {station})" if cape else "Open-Meteo Forecast"
 cape_time = datetime.utcnow().strftime("%a %I:%M %p UTC") if cape else now.strftime("%a %I:%M %p")
 cape = cape or forecast_data[0]["cape"]
-
 st.subheader(f"CAPE: {cape:.0f} J/kg")
 st.caption(f"Source: {cape_source}")
 st.caption(f"Updated: {cape_time}")
 
-# CAPE Chart
+# Shear Map Display
+st.subheader("Real-Time HRRR 0–6 km Bulk Shear Map")
+shear_img_url = "https://www.pivotalweather.com/maps/models/hrrr/20240330/1800/shear-bulk06h/hrrr_CONUS_202403301800_bulk06h_f000.png"
+st.image(shear_img_url, caption="Bulk Shear (HRRR) from Pivotal Weather", use_container_width=True)
+
+# CAPE Trend Chart
 st.subheader("CAPE Trend (Next 12 Hours)")
 fig, ax = plt.subplots(figsize=(10, 4))
 ax.plot(times, cape_vals, marker="o", color="goldenrod")
 ax.set_ylabel("CAPE (J/kg)")
 ax.set_xlabel("Time")
-ax.set_title("Forecasted CAPE")
 ax.grid(True)
 plt.xticks(rotation=45)
 plt.tight_layout()
 st.pyplot(fig)
 
-# CIN Chart
+# CIN Trend Chart
 st.subheader("CIN Trend (Next 12 Hours)")
 fig2, ax2 = plt.subplots(figsize=(10, 4))
 ax2.plot(times, cin_vals, marker="o", color="purple")
 ax2.set_ylabel("CIN (J/kg)")
 ax2.set_xlabel("Time")
-ax2.set_title("Forecasted CIN")
 ax2.grid(True)
 plt.xticks(rotation=45)
 plt.tight_layout()
 st.pyplot(fig2)
 
+# Forecast Block
 st.subheader(f"24-Hour Precipitation: {precip_24h:.2f} in")
 for hour in forecast_data:
     with st.container():
@@ -229,3 +232,12 @@ for hour in forecast_data:
         elif cin_val > -50:
             st.success("Weak or No Cap: Storms more likely.")
         st.markdown("---")
+"""
+
+# Show it to user
+import pandas as pd
+import ace_tools as tools
+tools.display_dataframe_to_user(
+    name="streamlit_app.py (with shear map and all features)",
+    dataframe=pd.DataFrame([{"file": "streamlit_app.py", "code": full_combined_code}])
+)
