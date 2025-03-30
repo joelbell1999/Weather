@@ -62,7 +62,7 @@ def get_weather_data(lat, lon):
     precip_24h = precip_last_24hrs[0] if precip_last_24hrs else 0
     return weather_data, precip_24h
 
-# Risk calculation logic
+# Risk score calculation
 def calculate_severe_risk(data):
     score = 0
     if data["cape"] >= 3000: score += 30
@@ -110,10 +110,9 @@ if user_input:
         st.progress(risk / 100)
         st.write(f"**Severe Risk Score:** `{risk}/100`")
 
-    # Add live SBCAPE map from SPC
+    # Live RAP SBCAPE (external link instead of embed)
     st.subheader("Real-Time RAP SBCAPE (Surface-Based CAPE)")
-    st.image(
-        "https://www.spc.noaa.gov/exper/mesoanalysis/s13/sfc_sbcape.gif",
-        caption="Live SBCAPE from SPC Mesoanalysis (Updates Hourly)",
-        use_container_width=True
-        )
+    st.markdown(
+        "[Click here to view the latest SBCAPE map from SPC](https://www.spc.noaa.gov/exper/mesoanalysis/s13/sfc_sbcape.gif)"
+    )
+    st.caption("This map is hosted by the SPC and opens in a new tab.")
