@@ -3,20 +3,22 @@ import requests
 from datetime import datetime
 import pytz
 
-# Convert ZIP to city/state using Zippopotam.us
-def zip_to_city(zip_code):
+# Convert ZIP to lat/lon using Zippopotam.us
+def zip_to_latlon(zip_code):
     try:
         res = requests.get(f"https://api.zippopotam.us/us/{zip_code}")
         data = res.json()
         city = data["places"][0]["place name"]
         state = data["places"][0]["state abbreviation"]
-        return f"{city}, {state}"
+        lat = float(data["places"][0]["latitude"])
+        lon = float(data["places"][0]["longitude"])
+        return lat, lon, f"{city}, {state}"
     except:
-        return None
+        return None, None, None
 
 # Get lat/lon from Open-Meteo using city name
-def get_coordinates(location_name):
-    geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={location_name}&country=US"
+def city_to_latlon(city_name):
+    geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={city_name}&country=US"
     res = requests.get(geo_url)
     data = res.json()
     if "results" in data and len(data["results"]) > 0:
@@ -81,22 +83,16 @@ st.title("DFW Severe Weather Risk Forecast")
 user_input = st.text_input("Enter ZIP Code or City, State", "76247")
 
 if user_input:
-    # Detect ZIP and convert to city if needed
     if user_input.isnumeric() and len(user_input) == 5:
-        location_name = zip_to_city(user_input)
-        if not location_name:
-            st.warning("ZIP code not recognized. Using DFW fallback.")
-            location_name = "Dallas, TX"
+        lat, lon, location_label = zip_to_latlon(user_input)
     else:
-        location_name = user_input
+        lat, lon, location_label = city_to_latlon(user_input)
 
-    lat, lon, city = get_coordinates(location_name)
-    
     if not lat or not lon:
         st.warning("Could not find location. Defaulting to DFW.")
-        lat, lon, city = 32.9, -97.3, "DFW Metroplex"
+        lat, lon, location_label = 32.9, -97.3, "DFW Metroplex"
 
-    st.markdown(f"**Location:** {city}")
+    st.markdown(f"**Location:** {location_label}")
     st.map({"lat": [lat], "lon": [lon]})
     weather_data, precip_24h = get_weather_data(lat, lon)
 
