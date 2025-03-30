@@ -77,10 +77,9 @@ def get_forecast(lat, lon):
                 "cape": hourly["cape"][i]
             })
 
-    # Collect CAPE trend data
     cape_times = []
     cape_values = []
-    for i, time in enumerate(hourly["time"][:12]):  # next 12 hours
+    for i, time in enumerate(hourly["time"][:12]):
         dt = datetime.fromisoformat(time).astimezone(central)
         cape_times.append(dt.strftime("%I %p"))
         cape_values.append(hourly["cape"][i])
@@ -119,7 +118,6 @@ if user_input:
     st.markdown(f"**Location:** {label}")
     st.map({"lat": [lat], "lon": [lon]})
 
-    # --- Get CAPE ---
     station = find_nearest_station(lat, lon)
     cape = get_rap_cape(station)
     cape_source = None
@@ -140,17 +138,19 @@ if user_input:
     st.caption(f"Source: {cape_source}")
     st.caption(f"Updated: {cape_time}")
 
-    # --- CAPE Trend Plot ---
+    # --- CAPE Trend Chart ---
     st.subheader("CAPE Trend (Next 12 Hours)")
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(10, 4))
     ax.plot(cape_times, cape_values, marker="o")
     ax.set_ylabel("CAPE (J/kg)")
-    ax.set_xlabel("Time")
+    ax.set_xlabel("Time (CT)")
     ax.set_title("Forecast CAPE Trend")
     ax.grid(True)
+    plt.xticks(rotation=45)
+    plt.tight_layout()
     st.pyplot(fig)
 
-    # --- Forecast Summary ---
+    # --- Forecast + Risk Score ---
     st.subheader(f"24-Hour Precipitation: {precip_24h:.2f} in")
     for hour in forecast_data:
         risk = calculate_risk(cape, hour)
