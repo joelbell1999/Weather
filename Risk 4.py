@@ -1,17 +1,16 @@
 import requests
 import streamlit as st
+from geopy.geocoders import Nominatim
 
 st.set_page_config(page_title="DFW Weather Risk", layout="centered")
 
-# Get current location from IP
-def get_current_location():
-    ipinfo_response = requests.get('https://ipinfo.io/json')
-    if ipinfo_response.status_code != 200:
-        return None, None, None, None
-    location_data = ipinfo_response.json()
-    lat, lon = location_data['loc'].split(',')
-    city = location_data.get('city', 'Unknown')
-    return float(lat), float(lon), city, location_data['loc']
+# Get coordinates from user-entered zip code
+def get_location_from_zip(zip_code):
+    geolocator = Nominatim(user_agent="weather-risk-app")
+    location = geolocator.geocode({"postalcode": zip_code, "country": "USA"})
+    if location:
+        return location.latitude, location.longitude, location.address
+    return None, None, "Unknown"
 
 # Get precipitation over the last 24 hours
 def get_precipitation_past_24hrs(lat, lon):
@@ -28,11 +27,7 @@ def get_precipitation_past_24hrs(lat, lon):
     return 0
 
 # Get current weather data
-def get_weather_data():
-    lat, lon, city, location_str = get_current_location()
-    if lat is None:
-        return [], 0, "Unknown", ""
-
+def get_weather_data(lat, lon):
     precip_last_24hrs = get_precipitation_past_24hrs(lat, lon)
     weather_data = []
 
@@ -61,7 +56,7 @@ def get_weather_data():
                 'pressure': data['surface_pressure'][i]
             })
 
-    return weather_data, precip_last_24hrs, city, location_str
+    return weather_data, precip_last_24hrs
 
 # Calculate risk score
 def calculate_severe_risk(period):
@@ -98,26 +93,29 @@ def calculate_severe_risk(period):
 # Streamlit UI
 st.title("DFW Severe Weather Risk")
 
-weather_data, precip_last_24hrs, city, location_str = get_weather_data()
+zip_code = st.text_input("Enter ZIP Code", value="76247")
+if zip_code:
+    lat, lon, location_name = get_location_from_zip(zip_code)
+    if lat and lon:
+        st.subheader(f"Location: {location_name}")
+        st.map(data={"lat": [lat], "lon": [lon]})
 
-st.subheader(f"Location: {city}")
-st.subheader(f"Precipitation in Last 24 Hours: {precip_last_24hrs} inches")
+        weather_data, precip_last_24hrs = get_weather_data(lat, lon)
+        st.subheader(f"Precipitation in Last 24 Hours: {precip_last_24hrs} inches")
 
-if location_str:
-    lat, lon = map(float, location_str.split(','))
-    st.map(data={"lat": [lat], "lon": [lon]})
-
-if not weather_data:
-    st.error("Could not retrieve weather data.")
-else:
-    for period in weather_data:
-        risk = calculate_severe_risk(period)
-        st.write(f"### Forecast for {period['time']}")
-        st.metric("Temperature", f"{period['temperature']} °F")
-        st.metric("Wind / Gusts", f"{period['windSpeed']} / {period['windGusts']} mph")
-        st.metric("Precipitation", f"{period['precipitation']} in ({period['precipProbability']}%)")
-        st.metric("Cloud / Humidity", f"{period['cloudCover']}% / {period['humidity']}%")
-        st.metric("Dewpoint", f"{period['dewpoint']} °F")
-        st.metric("CAPE", f"{period['cape']} J/kg")
-        st.progress(risk / 100)
-        st.write(f"**Severe Risk Factor:** {risk}/100")
+        if not weather_data:
+            st.error("Could not retrieve weather data.")
+        else:
+            for period in weather_data:
+                risk = calculate_severe_risk(period)
+                st.write(f"### Forecast for {period['time']}")
+                st.metric("Temperature", f"{period['temperature']} °F")
+                st.metric("Wind / Gusts", f"{period['windSpeed']} / {period['windGusts']} mph")
+                st.metric("Precipitation", f"{period['precipitation']} in ({period['precipProbability']}%)")
+                st.metric("Cloud / Humidity", f"{period['cloudCover']}% / {period['humidity']}%")
+                st.metric("Dewpoint", f"{period['dewpoint']} °F")
+                st.metric("CAPE", f"{period['cape']} J/kg")
+                st.progress(risk / 100)
+                st.write(f"**Severe Risk Factor:** {risk}/100")
+    else:
+        st.error("Could not determine location from ZIP code.")
