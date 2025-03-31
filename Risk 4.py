@@ -46,6 +46,18 @@ with st.container():
     m = folium.Map(location=[lat, lon], zoom_start=8, control_scale=True, prefer_canvas=True)
     folium.Marker([lat, lon], tooltip=f"{label}").add_to(m)
 
+    # Add RainViewer radar tile overlay
+    folium.raster_layers.TileLayer(
+        tiles="https://tilecache.rainviewer.com/v2/radar/{z}/{x}/{y}/1/1_1.png",
+        attr="RainViewer",
+        name="RainViewer Radar",
+        opacity=0.6,
+        overlay=True,
+        control=True
+    ).add_to(m)
+
+    folium.LayerControl().add_to(m)
+
     # Add SPC surface boundaries
 @st.cache_data(ttl=300)
 def get_surface_boundaries():
