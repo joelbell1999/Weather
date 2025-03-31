@@ -169,7 +169,8 @@ st.caption(f"**Sunrise:** {sunrise.strftime('%I:%M %p')} | **Sunset:** {sunset.s
 
 cape_source = f"RAP Sounding (Station: {station})" if cape else "Open-Meteo Forecast"
 cape_time = datetime.utcnow().strftime("%a %I:%M %p UTC") if cape else now.strftime("%a %I:%M %p")
-cape = cape or forecast_data[0]["cape"]
+if not cape and forecast_data:
+    cape = forecast_data[0].get("cape", 0)
 st.subheader(f"CAPE: {cape:.0f} J/kg")
 st.caption(f"Source: {cape_source}")
 st.caption(f"Updated: {cape_time}")
