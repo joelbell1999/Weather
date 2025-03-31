@@ -8,3 +8,4 @@ beautifulsoup4
 python-dateutil
 plotly
 folium
+streamlit_folium
