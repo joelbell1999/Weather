@@ -78,15 +78,28 @@ if st_data and "last_center" in st_data:
 
 # 🧭 SPC Outlook Overlay
 try:
-    spc_url = f"https://mesonet.agron.iastate.edu/json/spcoutlook.py?lon={lon}&lat={lat}&last=0&day=1&cat=categorical"
-    spc_outlook = requests.get(spc_url, timeout=5).json()
-    if spc_outlook and "day1" in spc_outlook:
-        area = spc_outlook["day1"].get("label", "No outlook")
-        st.markdown(f"**🗺️ SPC Day 1 Outlook (Categorical):** {area}")
-    else:
-        st.info("SPC outlook data not available.")
+    spc_url = f"https://www.spc.noaa.gov/products/outlook/day1otlk_cat.lyr.json"
+    spc_geojson = requests.get(spc_url, timeout=10).json()
+    found = False
+    for feature in spc_geojson.get("features", []):
+        coords = feature["geometry"].get("coordinates", [])
+        if not coords:
+            continue
+        for poly in coords:
+            polygon = [(pt[1], pt[0]) for pt in poly]
+            folium.Polygon(locations=polygon, color="green", weight=2, fill=True, fill_opacity=0.2, tooltip=feature.get("properties", {}).get("label", "Outlook")).add_to(m)
+            if folium.Polygon(locations=polygon).bounds[0][0] <= lat <= folium.Polygon(locations=polygon).bounds[1][0] and \
+               folium.Polygon(locations=polygon).bounds[0][1] <= lon <= folium.Polygon(locations=polygon).bounds[1][1]:
+                level = feature.get("properties", {}).get("label", "Outlook Area")
+                st.markdown(f"**🗺️ SPC Day 1 Outlook:** {level}")
+                found = True
+                break
+        if found:
+            break
+    if not found:
+        st.markdown("**🗺️ SPC Day 1 Outlook:** Not in highlighted risk area")
 except Exception as e:
-    st.warning("Failed to load SPC outlook data.")
+    st.warning("SPC categorical outlook data currently unavailable.")
 
 # 🧭 SPC Surface Boundary Layer
 if boundary_data and "features" in boundary_data:
