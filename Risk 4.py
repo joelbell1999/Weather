@@ -332,6 +332,7 @@ except Exception as e:
 
 # 🧭 Trigger Potential Estimate (Fallback)
 trigger_score = 0
+trigger_tooltip = []
 month = datetime.now().month
 if month in [3, 4, 5]: season = 'spring'
 elif month in [6, 7, 8]: season = 'summer'
@@ -339,10 +340,18 @@ else: season = 'fall'
 
 # Season-specific logic
 if season == 'spring':
-    if df["cin"].iloc[0] < -100 and df["cin"].iloc[1] > df["cin"].iloc[0]: trigger_score += 1
-    if df["dew"].iloc[1] - df["dew"].iloc[0] > 2: trigger_score += 1
-    if df["shear"].iloc[1] > df["shear"].iloc[0] and df["shear"].iloc[1] > 30: trigger_score += 1
-    if df["precip"].iloc[0] >= 0.05: trigger_score += 1
+    if df["cin"].iloc[0] < -100 and df["cin"].iloc[1] > df["cin"].iloc[0]:
+        trigger_score += 1
+        trigger_tooltip.append("CIN weakening")
+    if df["dew"].iloc[1] - df["dew"].iloc[0] > 2:
+        trigger_score += 1
+        trigger_tooltip.append("Dew point rising")
+    if df["shear"].iloc[1] > df["shear"].iloc[0] and df["shear"].iloc[1] > 30:
+        trigger_score += 1
+        trigger_tooltip.append("Shear increasing")
+    if df["precip"].iloc[0] >= 0.05:
+        trigger_score += 1
+        trigger_tooltip.append("Precip detected")
 elif season == 'summer':
     if df["dew"].iloc[1] > 70 and df["cin"].iloc[0] > -50: trigger_score += 1
     if df["cape"].iloc[0] > 3500: trigger_score += 1
@@ -362,7 +371,8 @@ else:
     trigger_emoji, trigger_msg, trigger_color = "✅", "No obvious trigger yet", "#2ecc71"
 
 st.markdown(f"**Season Profile Active:** `{season.title()}`")
-st.markdown(f"**Trigger Mechanism Signal:** {trigger_msg}")
+tooltip_text = ', '.join(trigger_tooltip) if trigger_tooltip else 'No active signals'
+st.markdown(f"**Trigger Mechanism Signal:** {trigger_msg} 🛈 <span title='{tooltip_text}' style='cursor: help;'>[?]</span>", unsafe_allow_html=True)
 st.markdown(f"{trigger_emoji} <div style='height: 20px; width: {trigger_score * 25}%; background-color: {trigger_color}; border-radius: 4px; transition: width 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
 
 # ✅ Storm Readiness Score (CAPE + CIN)
@@ -380,7 +390,7 @@ readiness_color = "#2ecc71" if readiness < thresholds[0] else "#ffaa00" if readi
 readiness_emoji = "✅" if readiness < thresholds[0] else "⚠️" if readiness < thresholds[1] else "⛔"
 readiness_width = max(min(readiness / 40, 100), 5)
 st.markdown(f"**Storm Readiness:** {readiness:.0f} (CAPE - |CIN|)")
-st.markdown(f"{readiness_emoji} <div style='height: 20px; width: {readiness_width}%; background-color: {readiness_color}; border-radius: 4px; transition: width 0.8s ease-in-out;'></div>", unsafe_allow_html=True); background-color: {readiness_color}; border-radius: 4px; transition: width 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
+st.markdown(f"{readiness_emoji} <div style='height: 20px; width: {readiness_width}%; background-color: {readiness_color}; border-radius: 4px; transition: width 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
 
 # 🔥 Current Risk Bar
 current_risk = df.iloc[0]["risk"]
