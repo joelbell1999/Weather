@@ -39,7 +39,10 @@ def geocode_location(query):
 user_input = st.text_input("Enter ZIP Code or City, State", "76247")
 lat, lon, label = geocode_location(user_input)
 st.markdown(f"**Location:** {label}")
-st.map({"lat": [lat], "lon": [lon]}, zoom=9, use_container_width=True)
+with st.container():
+    st.markdown("<div style='transform: scale(0.5); transform-origin: top left;'>", unsafe_allow_html=True)
+    st.map({"lat": [lat], "lon": [lon]}, zoom=9, use_container_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # 🚨 NWS Alerts Overlay
 alerts_url = f"https://api.weather.gov/alerts/active?point={lat},{lon}"
@@ -184,5 +187,17 @@ cape_cin_chart.update_layout(
     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
 )
 st.plotly_chart(cape_cin_chart, use_container_width=True)
+
+# 🌡️ Dew Point
+st.markdown("## Moisture Metric")
+with st.container():
+    dew_val = row["dew"]
+    dew_color = "#ff4d4d" if dew_val >= 70 else "#ffaa00" if dew_val >= 60 else "#2ecc71"
+    dew_emoji = "💧" if dew_val >= 70 else "⚠️" if dew_val >= 60 else "✅"
+    dew_width = max(min((dew_val - 50) * 4, 100), 5)  # scale 50-75°F to bar width
+
+    st.markdown(f"**Dew Point**")
+    st.markdown(f"<div style='font-size: 28px'>{dew_val:.0f} °F</div>", unsafe_allow_html=True)
+    st.markdown(f"{dew_emoji} <div style='height: 12px; width: {dew_width}%; background-color: {dew_color}; border-radius: 6px; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
 
 # ℹ️ Legend
