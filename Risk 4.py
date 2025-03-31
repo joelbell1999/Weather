@@ -12,7 +12,9 @@ REQUIRED_PACKAGES = [
     "geopy",
     "matplotlib",
     "python-dateutil",
-    "pytz"
+    "pytz",
+    "pytesseract",
+    "pillow"
 ]
 
 for package in REQUIRED_PACKAGES:
@@ -35,6 +37,9 @@ from bs4 import BeautifulSoup
 import re
 import time
 import matplotlib.pyplot as plt
+import pytesseract
+from PIL import Image
+import io
 from typing import Optional, Any
 
 # ---- CONSTANTS ----
@@ -104,54 +109,127 @@ def get_user_location() -> tuple[float, float, str]:
 
 # ---- WEATHER DATA FUNCTIONS ----
 @st.cache_data(ttl=CACHE_TTL)
-def get_pivotal_metrics() -> dict[str, Any]:
-    """Try to get metrics from Pivotal Weather"""
+def scrape_pivotal_metrics() -> Optional[dict[str, Any]]:
+    """Robust Pivotal Weather scraper with multiple fallback methods"""
+    headers = {
+        "User-Agent": "DFW Severe Weather Dashboard (Contact: admin@example.com)",
+        "Accept-Language": "en-US",
+        "Referer": "https://www.pivotalweather.com/"
+    }
+    
     try:
-        # Try scraping first
-        headers = {
-            "User-Agent": "DFW Severe Weather Dashboard (Contact: admin@example.com)",
-            "Accept-Language": "en-US"
-        }
-        
-        # Get CAPE page
-        cape_url = "https://www.pivotalweather.com/model.php?m=hrrr&p=sfc_cape"
-        response = requests.get(cape_url, headers=headers, timeout=API_TIMEOUT)
+        # Step 1: Get the main model page to find latest run
+        base_url = "https://www.pivotalweather.com/model.php?m=hrrr"
+        response = requests.get(base_url, headers=headers, timeout=API_TIMEOUT)
         response.raise_for_status()
-        
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Try to find CAPE value in multiple ways
+        # Find latest run time
+        run_info = soup.find("div", class_="model-run-info")
+        if not run_info:
+            raise ValueError("Could not find model run information")
+        
+        # Step 2: Get CAPE data - try multiple methods
         cape_value = None
-        for selector in [
-            {"class_": "parameter-value", "attrs": {"data-parameter": "cape"}},
-            {"class_": "data-value"},
-            {"id": "cape-value"}
-        ]:
-            element = soup.find("div", **selector)
-            if element:
-                match = re.search(r"(\d+)", element.text)
-                if match:
-                    cape_value = float(match.group(1))
-                    break
         
-        if not cape_value:
-            raise ValueError("Could not find CAPE value on page")
+        # Method 1: Try to get from HTML page
+        try:
+            cape_url = "https://www.pivotalweather.com/model.php?m=hrrr&p=sfc_cape"
+            cape_response = requests.get(cape_url, headers=headers, timeout=API_TIMEOUT)
+            cape_soup = BeautifulSoup(cape_response.text, 'html.parser')
+            
+            # Try multiple selectors for robustness
+            for selector in [
+                {"class_": "parameter-value", "attrs": {"data-parameter": "cape"}},
+                {"class_": "data-value"},
+                {"id": "cape-value"}
+            ]:
+                element = cape_soup.find("div", **selector)
+                if element and element.text.strip():
+                    match = re.search(r"(\d+)", element.text)
+                    if match:
+                        cape_value = float(match.group(1))
+                        break
+        except Exception:
+            pass
         
-        # Similar approach for shear
-        shear_value = 25.0  # Default fallback if scraping fails
+        # Method 2: Try to extract from image
+        if cape_value is None:
+            try:
+                cape_img_url = "https://www.pivotalweather.com/data/models/hrrr/latest/sfc_cape.png"
+                img_response = requests.get(cape_img_url, headers=headers, timeout=API_TIMEOUT)
+                
+                if 'image' in img_response.headers.get('Content-Type', ''):
+                    img = Image.open(io.BytesIO(img_response.content))
+                    text = pytesseract.image_to_string(img)
+                    match = re.search(r"(\d+)", text)
+                    if match:
+                        cape_value = float(match.group(1))
+            except Exception:
+                pass
+        
+        # Method 3: Fallback to default if all else fails
+        if cape_value is None:
+            cape_value = 0
+            st.warning("Using default CAPE value - could not scrape accurate data")
+        
+        # Step 3: Get Shear data (similar approach)
+        shear_value = None
+        
+        # Method 1: Try to get from HTML page
+        try:
+            shear_url = "https://www.pivotalweather.com/model.php?m=hrrr&p=shear_06km"
+            shear_response = requests.get(shear_url, headers=headers, timeout=API_TIMEOUT)
+            shear_soup = BeautifulSoup(shear_response.text, 'html.parser')
+            
+            for selector in [
+                {"class_": "parameter-value", "attrs": {"data-parameter": "shear"}},
+                {"class_": "data-value"},
+                {"id": "shear-value"}
+            ]:
+                element = shear_soup.find("div", **selector)
+                if element and element.text.strip():
+                    match = re.search(r"(\d+)", element.text)
+                    if match:
+                        shear_value = float(match.group(1)) * 1.15078  # Convert knots to mph
+                        break
+        except Exception:
+            pass
+        
+        # Method 2: Try to extract from image
+        if shear_value is None:
+            try:
+                shear_img_url = "https://www.pivotalweather.com/data/models/hrrr/latest/shear_06km.png"
+                img_response = requests.get(shear_img_url, headers=headers, timeout=API_TIMEOUT)
+                
+                if 'image' in img_response.headers.get('Content-Type', ''):
+                    img = Image.open(io.BytesIO(img_response.content))
+                    text = pytesseract.image_to_string(img)
+                    match = re.search(r"(\d+)", text)
+                    if match:
+                        shear_value = float(match.group(1)) * 1.15078  # Convert knots to mph
+            except Exception:
+                pass
+        
+        # Method 3: Fallback to default if all else fails
+        if shear_value is None:
+            shear_value = 25.0
+            st.warning("Using default shear value - could not scrape accurate data")
+        
         return {
             "cape_jkg": cape_value,
             "shear_mph": shear_value,
             "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "source": "Pivotal Weather HRRR"
+            "source": f"Pivotal Weather HRRR {run_info.text.strip()}"
         }
+        
     except Exception as e:
-        st.warning(f"Pivotal Weather scraping failed: {str(e)}")
-        raise  # Trigger fallback
+        st.warning(f"Scraping attempt failed: {str(e)}")
+        return None
 
 @st.cache_data(ttl=CACHE_TTL)
-def get_nws_metrics(lat: float, lon: float) -> dict[str, Any]:
-    """Get metrics from National Weather Service API"""
+def get_nws_severe_data(lat: float, lon: float) -> Optional[dict[str, Any]]:
+    """Get severe weather data from NWS API with robust error handling"""
     try:
         points_url = f"https://api.weather.gov/points/{lat},{lon}"
         points_resp = requests.get(points_url, timeout=API_TIMEOUT)
@@ -162,28 +240,23 @@ def get_nws_metrics(lat: float, lon: float) -> dict[str, Any]:
         grid_resp.raise_for_status()
         data = grid_resp.json()["properties"]
         
-        # Safely get CAPE with fallback
-        cape = 0
-        if "convectiveAvailablePotentialEnergy" in data:
-            cape = data["convectiveAvailablePotentialEnergy"]["values"][0]["value"]
-        
-        # Safely get wind data
-        wind_gust = 0
-        if "windGust" in data:
-            wind_gust = data["windGust"]["values"][0]["value"]
+        # Safely extract values with multiple fallbacks
+        cape = data.get("convectiveAvailablePotentialEnergy", {}).get("values", [{}])[0].get("value", 0)
+        wind_gust = data.get("windGust", {}).get("values", [{}])[0].get("value", 0)
         
         return {
             "cape_jkg": cape,
             "shear_mph": wind_gust,
-            "source": "NWS API"
+            "source": "National Weather Service",
+            "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M")
         }
     except Exception as e:
         st.warning(f"NWS API failed: {str(e)}")
-        raise  # Trigger fallback
+        return None
 
 @st.cache_data(ttl=CACHE_TTL)
-def get_openmeteo_metrics(lat: float, lon: float) -> dict[str, Any]:
-    """Get metrics from Open-Meteo API"""
+def get_openmeteo_severe_data(lat: float, lon: float) -> dict[str, Any]:
+    """Reliable fallback data source from Open-Meteo"""
     try:
         url = (
             f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
@@ -199,27 +272,33 @@ def get_openmeteo_metrics(lat: float, lon: float) -> dict[str, Any]:
         current_hour = datetime.now().hour
         
         return {
-            "cape_jkg": hourly["cape"][current_hour],
-            "shear_mph": hourly["windgusts_10m"][current_hour],
-            "source": "Open-Meteo Forecast"
+            "cape_jkg": hourly.get("cape", [0])[current_hour],
+            "shear_mph": hourly.get("windgusts_10m", [0])[current_hour],
+            "source": "Open-Meteo Forecast",
+            "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M")
         }
     except Exception as e:
         st.error(f"Open-Meteo failed: {str(e)}")
         return DEFAULT_METRICS
 
 def get_severe_metrics(lat: float, lon: float) -> dict[str, Any]:
-    """Get metrics with hierarchical fallback logic"""
-    try:
-        return get_pivotal_metrics()
-    except Exception:
-        try:
-            return get_nws_metrics(lat, lon)
-        except Exception:
-            return get_openmeteo_metrics(lat, lon)
+    """Hierarchical data fetching with scraping as first attempt"""
+    # 1. Try scraping first
+    scraped_data = scrape_pivotal_metrics()
+    if scraped_data:
+        return scraped_data
+    
+    # 2. Fallback to NWS API
+    nws_data = get_nws_severe_data(lat, lon)
+    if nws_data:
+        return nws_data
+    
+    # 3. Final fallback to Open-Meteo
+    return get_openmeteo_severe_data(lat, lon)
 
 @st.cache_data(ttl=CACHE_TTL)
 def get_hourly_forecast(lat: float, lon: float) -> tuple[Optional[list[dict[str, Any]]], ...]:
-    """Get weather forecast from Open-Meteo API"""
+    """Get detailed forecast from Open-Meteo"""
     try:
         url = (
             f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
@@ -342,7 +421,17 @@ def main():
             with col2:
                 st.metric("0-6km Shear", f"{metrics['shear_mph']:.1f} mph",
                          help="Bulk wind shear (storm organization potential)")
-            st.caption(f"Source: {metrics['source']} | Last updated: {metrics.get('last_updated', 'N/A')}")
+            st.caption(f"Source: {metrics['source']} | Last updated: {metrics['last_updated']}")
+            
+            # Display Pivotal Weather maps
+            st.subheader("Pivotal Weather Model Data")
+            map_col1, map_col2 = st.columns(2)
+            with map_col1:
+                st.image("https://www.pivotalweather.com/data/models/hrrr/latest/sfc_cape.png",
+                        caption="Latest HRRR CAPE", use_column_width=True)
+            with map_col2:
+                st.image("https://www.pivotalweather.com/data/models/hrrr/latest/shear_06km.png",
+                        caption="Latest HRRR 0-6km Shear", use_column_width=True)
             
             # Display trends if we have data
             if cape_vals and cin_vals:
