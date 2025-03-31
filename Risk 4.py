@@ -119,65 +119,43 @@ risk_color = '#ff4d4d' if current_risk >= 70 else '#ffaa00' if current_risk >= 4
 st.markdown(f"**Current Severe Weather Risk:** {current_risk}/100")
 st.markdown(f"<div style='height: 20px; width: {current_risk}%; background-color: {risk_color}; border-radius: 4px; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
 
-# 📈 Risk Trend Line (Plotly)
-st.subheader("Severe Weather Risk Trend")
-risk_chart = go.Figure()
-risk_chart.add_trace(go.Scatter(
-    x=df["time"],
-    y=df["risk"],
-    mode="lines+markers",
-    line=dict(color="#e74c3c"),
-    marker=dict(size=10, color=df["risk"], colorscale="RdYlGn_r", showscale=True),
-    name="Risk Score",
-    hovertemplate="Time: %{x}<br>Risk: %{y}<extra></extra>"
-))
-risk_chart.update_layout(
-    yaxis=dict(title="Risk Score", range=[0, 100]),
-    xaxis=dict(title="Time", tickangle=-45),
-    height=300,
-    margin=dict(l=20, r=20, t=30, b=80),
-    showlegend=False
-)
-st.plotly_chart(risk_chart, use_container_width=True)
+# 🌪️🌡️ CAPE / Shear / SRH Display
+st.markdown("## Current Severe Indices")
+row = df.iloc[0]
 
+cols = st.columns(3)
 
+# CAPE
+with cols[0]:
+    st.markdown(f"**CAPE**")
+    st.markdown(f"<div style='font-size: 28px'>{row['cape']:.0f} J/kg</div>", unsafe_allow_html=True)
+    cape_val = row["cape"]
+    cape_color = "#ff4d4d" if cape_val >= 3000 else "#ffaa00" if cape_val >= 1500 else "#2ecc71"
+    cape_emoji = "🌪️" if cape_val >= 3000 else "⚠️" if cape_val >= 1500 else "✅"
+    cape_width = max(min(cape_val / 40, 100), 5)
+    st.markdown(f"{cape_emoji} <div style='height: 12px; width: {cape_width}%; background-color: {cape_color}; border-radius: 6px; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
 
-# 🌅 Local time from first forecast entry
-timezone = "America/Chicago"
-local_time = datetime.fromisoformat(hours[0]["time"]).replace(tzinfo=ZoneInfo(timezone))
-st.caption(f"**Local Forecast Time:** {local_time.strftime('%A %I:%M %p')} ({timezone})")
+# Shear
+with cols[1]:
+    st.markdown(f"**Shear (ΔSpeed)**")
+    st.markdown(f"<div style='font-size: 28px'>{row['shear']:.1f} mph</div>", unsafe_allow_html=True)
+    shear_val = row["shear"]
+    shear_color = "#ff4d4d" if shear_val >= 40 else "#ffaa00" if shear_val >= 30 else "#2ecc71"
+    shear_emoji = "💨" if shear_val >= 40 else "⚠️" if shear_val >= 30 else "✅"
+    shear_width = max(min(shear_val, 100), 5)
+    st.markdown(f"{shear_emoji} <div style='height: 12px; width: {shear_width}%; background-color: {shear_color}; border-radius: 6px; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
 
-# 📊 CAPE & CIN Trend (Plotly)
-st.subheader("CAPE & CIN Trend")
-cape_cin_chart = go.Figure()
-cape_cin_chart.add_trace(go.Scatter(
-    x=df["time"],
-    y=df["cape"],
-    mode="lines+markers",
-    name="CAPE",
-    line=dict(color="orange"),
-    marker=dict(symbol="circle"),
-    hovertemplate="Time: %{x}<br>CAPE: %{y} J/kg<extra></extra>"
-))
-cape_cin_chart.add_trace(go.Scatter(
-    x=df["time"],
-    y=df["cin"],
-    mode="lines+markers",
-    name="CIN",
-    line=dict(color="purple", dash="dash"),
-    marker=dict(symbol="x"),
-    hovertemplate="Time: %{x}<br>CIN: %{y} J/kg<extra></extra>"
-))
-cape_cin_chart.update_layout(
-    yaxis=dict(title="J/kg"),
-    xaxis=dict(title="Time", tickangle=-45),
-    height=300,
-    margin=dict(l=20, r=20, t=30, b=80),
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-)
-st.plotly_chart(cape_cin_chart, use_container_width=True)
+# SRH
+with cols[2]:
+    st.markdown(f"**SRH**")
+    st.markdown(f"<div style='font-size: 28px'>{row['srh']:.0f} m²/s²</div>", unsafe_allow_html=True)
+    srh_val = row["srh"]
+    srh_color = "#ff4d4d" if srh_val >= 150 else "#ffaa00" if srh_val >= 100 else "#2ecc71"
+    srh_emoji = "🌀" if srh_val >= 150 else "⚠️" if srh_val >= 100 else "✅"
+    srh_width = max(min(srh_val / 2, 100), 5)
+    st.markdown(f"{srh_emoji} <div style='height: 12px; width: {srh_width}%; background-color: {srh_color}; border-radius: 6px; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
 
-# 📊 Hourly Forecast Breakdown
+# ℹ️ Legend
 with st.expander("ℹ️ Emoji Legend for Severity Bars"):
     st.markdown("""
     - **🌪️** CAPE: Extreme instability (≥ 3000 J/kg)
@@ -186,46 +164,3 @@ with st.expander("ℹ️ Emoji Legend for Severity Bars"):
     - **⚠️** Moderate values
     - **✅** Benign conditions
     """)
-st.subheader("Severe Weather Risk - Next 12 Hours")
-for _, row in df.iterrows():
-    st.markdown(f"### {row['time']}")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Temp", f"{row['temp']} °F")
-        st.metric("Dew Point", f"{row['dew']} °F")
-        st.metric("CIN", f"{row['cin']:.0f} J/kg")
-    with col2:
-        st.metric("Wind", f"{row['wind']} mph")
-        st.metric("Gusts", f"{row['gusts']} mph")
-        st.metric("Humidity", f"{row['humidity']}%")
-    with col3:
-        st.metric("Precip", f"{row['precip']:.2f} in/hr")
-        st.metric("CAPE", f"{row['cape']:.0f} J/kg")
-        st.metric("Shear (ΔSpeed)", f"{row['shear']:.1f} mph")
-        st.metric("SRH", f"{row['srh']:.0f} m²/s²")
-        st.metric("Risk Score", f"{row['risk']}/100")
-        st.progress(row["risk"] / 100)
-
-        # CAPE Bar
-        cape_val = row["cape"]
-        cape_color = "#ff4d4d" if cape_val >= 3000 else "#ffaa00" if cape_val >= 1500 else "#2ecc71"
-        cape_emoji = "🌪️" if cape_val >= 3000 else "⚠️" if cape_val >= 1500 else "✅"  # 🌪️ = Extreme, ⚠️ = Moderate, ✅ = Low
-        cape_width = max(min(cape_val / 40, 100), 5)
-        st.markdown(f"{cape_emoji} <div style='margin-top: -8px; height: 12px; width: {cape_width}%; background-color: {cape_color}; border-radius: 6px; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
-
-        # Shear Bar
-        shear_val = row["shear"]
-        shear_color = "#ff4d4d" if shear_val >= 40 else "#ffaa00" if shear_val >= 30 else "#2ecc71"
-        shear_emoji = "💨" if shear_val >= 40 else "⚠️" if shear_val >= 30 else "✅"  # 💨 = High Shear, ⚠️ = Moderate, ✅ = Low
-        shear_width = max(min(shear_val, 100), 5)
-        st.markdown(f"{shear_emoji} <div style='margin-top: -8px; height: 12px; width: {shear_width}%; background-color: {shear_color}; border-radius: 6px; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
-
-        # SRH Bar
-        srh_val = row["srh"]
-        srh_color = "#ff4d4d" if srh_val >= 150 else "#ffaa00" if srh_val >= 100 else "#2ecc71"
-        srh_emoji = "🌀" if srh_val >= 150 else "⚠️" if srh_val >= 100 else "✅"  # 🌀 = Strong SRH, ⚠️ = Elevated, ✅ = Calm
-        srh_width = max(min(srh_val / 2, 100), 5)
-        st.markdown(f"{srh_emoji} <div style='margin-top: -8px; height: 12px; width: {srh_width}%; background-color: {srh_color}; border-radius: 6px; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
-        st.markdown(f"<div style='margin-top: -8px; height: 12px; width: {srh_width}%; background-color: {srh_color};'></div>", unsafe_allow_html=True)
-
-    st.markdown("---")
