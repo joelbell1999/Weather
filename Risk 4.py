@@ -1,7 +1,3 @@
-# Combining the full app with CAPE/CIN, risk score logic, background theme,
-# browser geolocation, and real-time Pivotal shear map display.
-
-full_combined_code = """
 import streamlit as st
 import requests
 import pandas as pd
@@ -15,7 +11,7 @@ st.set_page_config("Severe Weather Dashboard", layout="centered")
 st.title("Severe Weather Dashboard")
 
 # Browser geolocation injection
-st.markdown(\"\"\"
+st.markdown("""
 <script>
 navigator.geolocation.getCurrentPosition(
   (loc) => {
@@ -27,9 +23,9 @@ navigator.geolocation.getCurrentPosition(
   }
 );
 </script>
-\"\"\", unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
-location_coords = st.experimental_get_query_params().get("geolocation", [None])[0]
+location_coords = st.query_params.get("geolocation", [None])[0]
 
 if location_coords and location_coords != "geo_failed":
     lat, lon = map(float, location_coords.split(","))
@@ -171,7 +167,6 @@ set_background_theme(now, sunrise, sunset)
 st.caption(f"**Local Time (Forecast Location):** {now.strftime('%A %I:%M %p')} ({timezone})")
 st.caption(f"**Sunrise:** {sunrise.strftime('%I:%M %p')} | **Sunset:** {sunset.strftime('%I:%M %p')}")
 
-# CAPE Section
 cape_source = f"RAP Sounding (Station: {station})" if cape else "Open-Meteo Forecast"
 cape_time = datetime.utcnow().strftime("%a %I:%M %p UTC") if cape else now.strftime("%a %I:%M %p")
 cape = cape or forecast_data[0]["cape"]
@@ -179,12 +174,12 @@ st.subheader(f"CAPE: {cape:.0f} J/kg")
 st.caption(f"Source: {cape_source}")
 st.caption(f"Updated: {cape_time}")
 
-# Shear Map Display
+# Real-time shear map
 st.subheader("Real-Time HRRR 0–6 km Bulk Shear Map")
 shear_img_url = "https://www.pivotalweather.com/maps/models/hrrr/20240330/1800/shear-bulk06h/hrrr_CONUS_202403301800_bulk06h_f000.png"
 st.image(shear_img_url, caption="Bulk Shear (HRRR) from Pivotal Weather", use_container_width=True)
 
-# CAPE Trend Chart
+# CAPE Trend
 st.subheader("CAPE Trend (Next 12 Hours)")
 fig, ax = plt.subplots(figsize=(10, 4))
 ax.plot(times, cape_vals, marker="o", color="goldenrod")
@@ -195,7 +190,7 @@ plt.xticks(rotation=45)
 plt.tight_layout()
 st.pyplot(fig)
 
-# CIN Trend Chart
+# CIN Trend
 st.subheader("CIN Trend (Next 12 Hours)")
 fig2, ax2 = plt.subplots(figsize=(10, 4))
 ax2.plot(times, cin_vals, marker="o", color="purple")
@@ -206,7 +201,7 @@ plt.xticks(rotation=45)
 plt.tight_layout()
 st.pyplot(fig2)
 
-# Forecast Block
+# Forecast hour blocks
 st.subheader(f"24-Hour Precipitation: {precip_24h:.2f} in")
 for hour in forecast_data:
     with st.container():
@@ -232,10 +227,3 @@ for hour in forecast_data:
         elif cin_val > -50:
             st.success("Weak or No Cap: Storms more likely.")
         st.markdown("---")
-"""
-
-# Show it to user
-import pandas as pd
-    name="streamlit_app.py (with shear map and all features)",
-    dataframe=pd.DataFrame([{"file": "streamlit_app.py", "code": full_combined_code}])
-)
