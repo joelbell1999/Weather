@@ -155,12 +155,34 @@ with cols[2]:
     srh_width = max(min(srh_val / 2, 100), 5)
     st.markdown(f"{srh_emoji} <div style='height: 12px; width: {srh_width}%; background-color: {srh_color}; border-radius: 6px; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
 
+# 📊 CAPE & CIN Trend (Plotly)
+st.subheader("CAPE & CIN Trend")
+cape_cin_chart = go.Figure()
+cape_cin_chart.add_trace(go.Scatter(
+    x=df["time"],
+    y=df["cape"],
+    mode="lines+markers",
+    name="CAPE",
+    line=dict(color="orange"),
+    marker=dict(symbol="circle"),
+    hovertemplate="Time: %{x}<br>CAPE: %{y} J/kg<extra></extra>"
+))
+cape_cin_chart.add_trace(go.Scatter(
+    x=df["time"],
+    y=df["cin"],
+    mode="lines+markers",
+    name="CIN",
+    line=dict(color="purple", dash="dash"),
+    marker=dict(symbol="x"),
+    hovertemplate="Time: %{x}<br>CIN: %{y} J/kg<extra></extra>"
+))
+cape_cin_chart.update_layout(
+    yaxis=dict(title="J/kg"),
+    xaxis=dict(title="Time", tickangle=-45),
+    height=300,
+    margin=dict(l=20, r=20, t=30, b=80),
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+)
+st.plotly_chart(cape_cin_chart, use_container_width=True)
+
 # ℹ️ Legend
-with st.expander("ℹ️ Emoji Legend for Severity Bars"):
-    st.markdown("""
-    - **🌪️** CAPE: Extreme instability (≥ 3000 J/kg)
-    - **💨** Shear: High wind shear (≥ 40 mph)
-    - **🌀** SRH: Strong storm-relative helicity (≥ 150 m²/s²)
-    - **⚠️** Moderate values
-    - **✅** Benign conditions
-    """)
