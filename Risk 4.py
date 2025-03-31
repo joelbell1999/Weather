@@ -77,29 +77,40 @@ if st_data and "last_center" in st_data:
     lon = st_data["last_center"][1]
 
 # 🧭 SPC Outlook Overlay
+import geopandas as gpd
+from shapely.geometry import shape
+
 try:
-    spc_url = "https://www.spc.noaa.gov/products/outlook/day1otlk_cat.lyr.geojson"
-    spc_geojson = requests.get(spc_url, timeout=10).json()
-    found = False
-    for feature in spc_geojson.get("features", []):
-        coords = feature["geometry"].get("coordinates", [])
-        if not coords:
-            continue
-        for poly in coords:
-            polygon = [(pt[1], pt[0]) for pt in poly]
-            folium.Polygon(locations=polygon, color="green", weight=2, fill=True, fill_opacity=0.2, tooltip=feature.get("properties", {}).get("label", "Outlook")).add_to(m)
-            if folium.Polygon(locations=polygon).bounds[0][0] <= lat <= folium.Polygon(locations=polygon).bounds[1][0] and \
-               folium.Polygon(locations=polygon).bounds[0][1] <= lon <= folium.Polygon(locations=polygon).bounds[1][1]:
-                level = feature.get("properties", {}).get("label", "Outlook Area")
-                st.markdown(f"**🗺️ SPC Day 1 Outlook:** {level}")
-                found = True
-                break
-        if found:
-            break
-    if not found:
-        st.markdown("**🗺️ SPC Day 1 Outlook:** Not in highlighted risk area")
+    from datetime import date
+
+today = date.today().strftime("%Y%m%d")
+shapefile_url = f"https://www.spc.noaa.gov/products/outlook/archive/{today[:4]}/day1otlk_cat_{today}_1300.zip""
+    gdf = gpd.read_file(shapefile_url)
+    for _, row in gdf.iterrows():
+        color_map = {
+            "MRGL": "green",
+            "SLGT": "yellow",
+            "ENH": "orange",
+            "MDT": "red",
+            "HIGH": "purple"
+        }
+        color = color_map.get(row["LABEL"], "gray")
+        geom = row["geometry"]
+        if geom.geom_type == "Polygon":
+            folium.GeoJson(
+                data=geom.__geo_interface__,
+                style_function=lambda x, color=color: {
+                    'fillColor': color,
+                    'color': color,
+                    'weight': 2,
+                    'fillOpacity': 0.25
+                },
+                tooltip=row["LABEL"]
+            ).add_to(m)
 except Exception as e:
-    st.warning("SPC categorical outlook data currently unavailable.")
+    st.warning("SPC shapefile outlook overlay unavailable.")
+except Exception as e:
+    st.warning("SPC categorical outlook image currently unavailable.")
 
 # 🧭 SPC Surface Boundary Layer
 if boundary_data and "features" in boundary_data:
