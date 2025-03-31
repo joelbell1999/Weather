@@ -116,7 +116,7 @@ df["risk"] = df.apply(calculate_risk, axis=1)
 current_risk = df.iloc[0]["risk"]
 risk_color = '#ff4d4d' if current_risk >= 70 else '#ffaa00' if current_risk >= 40 else '#2ecc71'
 st.markdown(f"**Current Severe Weather Risk:** {current_risk}/100")
-st.markdown(f"<div style='height: 20px; width: {current_risk}%; background-color: {risk_color}; border-radius: 4px;'></div>", unsafe_allow_html=True)
+st.markdown(f"<div style='height: 20px; width: {current_risk}%; background-color: {risk_color}; border-radius: 4px; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
 
 # 📈 Risk Trend Line
 st.subheader("Severe Weather Risk Trend")
@@ -128,6 +128,15 @@ ax_risk.set_xticks(range(len(df["time"])))
 ax_risk.set_xticklabels(df["time"], rotation=45, ha="right")
 ax_risk.grid(True)
 st.pyplot(fig_risk)
+
+# Animate severe risk trend with color-based emphasis
+for i, score in enumerate(df['risk']):
+    if score >= 70:
+        ax_risk.plot(i, score, marker='o', color='red', markersize=10)
+    elif score >= 40:
+        ax_risk.plot(i, score, marker='o', color='orange', markersize=8)
+    else:
+        ax_risk.plot(i, score, marker='o', color='green', markersize=6)
 
 # 🌅 Local time from first forecast entry
 timezone = "America/Chicago"
@@ -169,21 +178,22 @@ for _, row in df.iterrows():
         st.progress(row["risk"] / 100)
 
         # CAPE Bar
+        st.metric("CAPE", f"{row['cape']:.0f} J/kg")
         cape_val = row["cape"]
         cape_color = "#ff4d4d" if cape_val >= 3000 else "#ffaa00" if cape_val >= 1500 else "#2ecc71"
         cape_width = max(min(cape_val / 40, 100), 5)
-        st.markdown(f"<div style='margin-top: 4px; height: 12px; width: {cape_width}%; background-color: {cape_color};'></div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='margin-top: -8px; height: 12px; width: {cape_width}%; background-color: {cape_color}; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
 
         # Shear Bar
         shear_val = row["shear"]
         shear_color = "#ff4d4d" if shear_val >= 40 else "#ffaa00" if shear_val >= 30 else "#2ecc71"
         shear_width = max(min(shear_val, 100), 5)
-        st.markdown(f"<div style='margin-top: 4px; height: 12px; width: {shear_width}%; background-color: {shear_color};'></div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='margin-top: -8px; height: 12px; width: {shear_width}%; background-color: {shear_color};'></div>", unsafe_allow_html=True)
 
         # SRH Bar
         srh_val = row["srh"]
         srh_color = "#ff4d4d" if srh_val >= 150 else "#ffaa00" if srh_val >= 100 else "#2ecc71"
         srh_width = max(min(srh_val / 2, 100), 5)
-        st.markdown(f"<div style='margin-top: 4px; height: 12px; width: {srh_width}%; background-color: {srh_color};'></div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='margin-top: -8px; height: 12px; width: {srh_width}%; background-color: {srh_color};'></div>", unsafe_allow_html=True)
 
     st.markdown("---")
