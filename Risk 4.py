@@ -80,8 +80,8 @@ if st_data and "last_center" in st_data:
 import geopandas as gpd
 from shapely.geometry import shape
 
+from datetime import date, timedelta
 try:
-    from datetime import date
 
 today = date.today().strftime("%Y%m%d")
 from pathlib import Path
