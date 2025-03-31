@@ -21,7 +21,10 @@ def get_tomorrowio_data(lat, lon):
         f"&apikey={API_KEY}"
     )
     r = requests.get(url)
-    return r.json() if r.status_code == 200 else None
+    if r.status_code != 200:
+        st.error(f"Tomorrow.io API error: {r.status_code} - {r.text}")
+        return None
+    return r.json()
 
 @st.cache_data
 def geocode_location(query):
@@ -38,19 +41,18 @@ st.map({"lat": [lat], "lon": [lon]})
 
 data = get_tomorrowio_data(lat, lon)
 if not data:
-    st.error("Failed to fetch weather data.")
     st.stop()
 
 hours = data['timelines']['hourly']
 df = pd.DataFrame([{
     "time": datetime.fromisoformat(h["time"]).strftime("%a %I:%M %p"),
-    "temp": h["values"]["temperature"],
-    "dew": h["values"]["dewPoint"],
-    "humidity": h["values"]["humidity"],
-    "wind": h["values"]["windSpeed"],
-    "gusts": h["values"]["windGust"],
-    "precip": h["values"]["precipitationIntensity"],
-    "clouds": h["values"]["cloudCover"],
+    "temp": h["values"].get("temperature"),
+    "dew": h["values"].get("dewPoint"),
+    "humidity": h["values"].get("humidity"),
+    "wind": h["values"].get("windSpeed"),
+    "gusts": h["values"].get("windGust"),
+    "precip": h["values"].get("precipitationIntensity", 0),
+    "clouds": h["values"].get("cloudCover"),
     "cape": h["values"].get("cap", 0),
     "cin": h["values"].get("cin", 0)
 } for h in hours[:12]])
