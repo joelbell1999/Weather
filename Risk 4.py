@@ -1,84 +1,116 @@
 import streamlit as st
-from requests import get, post
-from typing import Optional
+from datetime import datetime, timedelta
+import matplotlib.pyplot as plt
+import pandas as pd
+import requests
 
-def load_from_file(file_path: str) -> Optional[(float, float)]:
-    """Load and process .txt files from file path."""
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            data = loads(f.read().text.split('@').get('data'))
-            lat2, lon2 = [float(p['latitude']), 
-                         float(p['longitude']) for p in data[1]]
-        
-        return (lat2, lon2), "RAP"
-    
-    except Exception as e:
-        st.error(f"{file_path} Failed to load .txt file. {e}")
+# Constants
+MAP_URL = "https://www.pivotalweather.com/maps/models/hrrr/20240330/1800/shear-bulk06h/hrrr_CONUS_202403301800_bulk06h_f000.png"
 
-def fetch_rap Forecast(source: int) -> Optional[(float, float)]:
-    """Fetch real-time rap forecast."""
-    try:
-        data = loads(get_file(f"rap/sounding/{source}"))
-        lat, lon = [float(p['latitude']), 
-                   float(p['longitude']) for p in data[1]]
-        
-        return (lat, lon), "RAP"
-    
-    except Exception as e:
-        st.error(f"{source} {RP}: No RAP forecast available.")
+def find_nearest_station(lat, lon):
+    # Implement your own logic to find the nearest station
+    # For demonstration purposes, let's assume we have a database of stations with their latitudes and longitudes
+    station_database = [
+        {"name": "Station 1", "lat": 37.7749, "lon": -122.4194},
+        {"name": "Station 2", "lat": 34.0522, "lon": -118.2437},
+        # Add more stations here...
+    ]
+
+    min_distance = float("inf")
+    nearest_station = None
+
+    for station in station_database:
+        distance = calculate_distance(lat, lon, station["lat"], station["lon"])
+        if distance < min_distance:
+            min_distance = distance
+            nearest_station = station["name"]
+
+    return nearest_station
+
+def calculate_rap_cape_data(station_name):
+    # Simulate retrieving RAP cape data from a database or API (replace with actual implementation)
+    rap_cape_database = {
+        "Station 1": {"cape": 100, "time": datetime.now()},
+        "Station 2": {"cape": 50, "time": datetime.now() - timedelta(hours=3)},
+        # Add more stations here...
+    }
+
+    if station_name in rap_cape_database:
+        return rap_cape_database[station_name]
+    else:
         return None
 
-def main():
-    st.set_page_config(page_title="Severe Weather Dashboard", layout='wide')
+def calculate_risk(cape, hour):
+    # Implement your own logic to calculate risk score (replace with actual implementation)
+    # For demonstration purposes, let's assume a simple formula
+    if cape > 100:
+        return 50
+    elif -100 < cape <= 100:
+        return 25
+    else:
+        return -75
 
-    with st.expander('Select Data Source'):
-        if fetch_rap Forecast(1) is not None:
-            col1, col2 = st.columns([0.35, 0.65])
-            with col1:
-                real_time_button = st.button("Real Time RAP Prediction")
-                with st.expander('Enter station selection for Real Time Data'):
-                    selected_station = ['RAP Forecast']
-                    select_list = ['Select', 'Rap Forecast']
-                    val = st.selectbox('', options=select_list)
-                    if val == 'Rap Forecast':
-                        real_time_data, _ = fetch_rap Forecast(1)
-                        col1.write(f"Real Time Data: {real_time_data}")
-                with st.expander('Enter station selection for Actual Weather Display'):
-                    actual_station = ['Actual Weather Display']
-                    select_list_actual = ['Select', 'Actual Weathers'] 
-                    val_actual = st.selectbox('', options=select_list_actual)
-                    if val_actual == 'Actual Weathers':
-                        col2.write(f"Actual Weathers: None")
+def calculate_distance(lat1, lon1, lat2, lon2):
+    import math
 
-            with col2:
-                actual_data, _ = load_from_file('rapForecast.txt')
-                col1.write(actual_data)
+    R = 6371.0 # Radius of the Earth in kilometers
 
-    with st.expander('Real-Time Prediction'):
-        real_time_button = st.button("Predict Real Time")
-        if fetch_rap Forecast(1):
-            data, raps = fetch_rap Forecast(1)
-            if not data:
-                col1.write("No Data Available for RAP Forecast.")
-        
-        actual_data, _ = load_from_file('rapForecast.txt')
-        col2.write(actual_data)
+    dlat = math.radians(lat2-lat1)
+    dlon = math.radians(lon2-lon1)
 
-def explain():
-    st.subheader("RAP Format:")
-    try:
-        real_time_data, raps = fetch_rap Forecast(1)
-        st.write(f"Type: {real_time_data.__class__.__name__}")
-        if isinstance(real_time_data, dict):
-            stations = [k for v in real_time_data.values() 
-                       if isinstance(v, list) and len(v) > 0]
-            st.write("Select station:", "• Press 'Rap Forecast' to see data")
-    except Exception as e:
-        st.error(f"Failed to fetch RAP Data: {e}")
+    a = (math.sin(dlat/2) * math.cos(math.radians(lat1)))
+            + (math.sin(dlon/2) * math.cos(math.radians(lat1))
+               * math.cos(math.radians(lat2)))
 
-def main():
-    with streamlit_page_config('Severe Weather Dashboard'):
-        explain()
-        
-if __name__ == "__main__":
-    main()
+    c = 2 * math.atan2(a, math.sqrt((math.pow(a, 2))+(
+                math.pow(math.sin(dlat), 2)
+                + math.pow(math.sin(dlon), 2))*math.cos(math.radians(lat1))))
+
+    return R*c
+
+# Main application
+st.title("Weather Application")
+st.write("This is a weather application that displays the current forecast and real-time shear map.")
+
+station = find_nearest_station(st.session_state.lat, st.session_state.lon)
+
+if station:
+    rap_cape_data = calculate_rap_cape_data(station)
+    if rap_cape_data:
+        cape_source = "RAP Sounding"
+        cape_time = datetime.now().strftime("%a %I:%M %p UTC")
+        risk_score = calculate_risk(rap_cape_data["cape"], 0)
+
+        st.subheader(f"CAPE: {rap_cape_data['cape']} J/kg")
+        st.caption(f"Source: {cape_source}")
+        st.caption(f"Updated: {cape_time}")
+
+        # Real-time shear map
+        st.subheader("Real-Time HRRR 0–6 km Bulk Shear Map")
+        img = st.image(MAP_URL, caption="Bulk Shear (HRRR) from Pivotal Weather")
+
+else:
+    st.error("No nearest station found.")
+
+# Simulated forecast data
+forecast_data = pd.DataFrame({
+    "time": [datetime.now()],
+    "temperature": ["Temperature"],
+    "dewpoint": ["Dew point"],
+    "wind_speed": ["Wind speed"],
+    "cloud_cover": ["Cloud cover (%)"],
+    "humidity": ["Humidity (%)"],
+})
+
+col1, col2 = st.columns(2)
+with col1:
+    fig, ax = plt.subplots()
+    ax.plot([0], [50])
+    ax.set_title("Simulated Forecast")
+ax.grid(True)
+plt.tight_layout()
+
+with col2:
+    risk_score = 100
+    if -75 <= risk_score <= 25:
+        st.success(f"Risk Score: {risk_score}")
