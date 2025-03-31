@@ -4,3 +4,5 @@ pandas
 geopy
 pytz
 matplotlib
+beautifulsoup4
+python-dateutil
