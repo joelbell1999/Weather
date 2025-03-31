@@ -1,57 +1,18 @@
-import streamlit as st
 import requests
 import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from geopy.distance import geodesic
+from geopy.hypersurface import GeodesicDistance
 from io import StringIO
 import matplotlib.pyplot as plt
 
 st.set_page_config("Severe Weather Dashboard", layout="centered")
 st.title("Severe Weather Dashboard")
 
-# Browser geolocation injection
-st.markdown("""
-<script>
-navigator.geolocation.getCurrentPosition(
-  (loc) => {
-    const coords = `${loc.coords.latitude},${loc.coords.longitude}`;
-    window.parent.postMessage({type: 'streamlit:setComponentValue', value: coords}, "*");
-  },
-  (err) => {
-    window.parent.postMessage({type: 'streamlit:setComponentValue', value: 'geo_failed'}, "*");
-  }
-);
-</script>
-""", unsafe_allow_html=True)
+#bie location inputs:
 
-location_coords = st.query_params.get("geolocation", [None])[0]
-
-if location_coords and location_coords != "geo_failed":
-    lat, lon = map(float, location_coords.split(","))
-    label = "Detected Location (via Browser)"
-else:
-    user_input = st.text_input("Enter ZIP Code or City, State", "76247")
-    if user_input.isnumeric():
-        r = requests.get(f"https://api.zippopotam.us/us/{user_input}")
-        data = r.json()
-        place = data["places"][0]
-        lat, lon = float(place["latitude"]), float(place["longitude"])
-        label = f"{place['place name']}, {place['state abbreviation']}"
-    else:
-        url = f"https://geocoding-api.open-meteo.com/v1/search?name={user_input}&country=US"
-        r = requests.get(url).json()
-        if "results" in r and r["results"]:
-            res = r["results"][0]
-            lat, lon, label = res["latitude"], res["longitude"], res["name"]
-        else:
-            lat, lon, label = 32.9, -97.3, "DFW Metroplex"
-            st.warning("Could not find location. Defaulting to DFW.")
-
-st.markdown(f"**Location:** {label}")
-st.map({"lat": [lat], "lon": [lon]})
-
-stations = {
+station_locations = {
     "KOUN": {"lat": 35.23, "lon": -97.46},
     "KFWD": {"lat": 32.83, "lon": -97.30},
     "KAMA": {"lat": 35.22, "lon": -101.72},
@@ -59,172 +20,161 @@ stations = {
     "KSHV": {"lat": 32.45, "lon": -93.83}
 }
 
-def find_nearest_station(lat, lon):
-    return min(stations, key=lambda s: geodesic((lat, lon), (stations[s]['lat'], stations[s]['lon'])).miles)
+# Geocoding helper function:
+from geopy import Geo
+import numpy as np
 
-def get_rap_cape(station):
-    now = datetime.utcnow()
-    url = (
-        "https://mesonet.agron.iastate.edu/cgi-bin/request/raob.py?"
-        f"station={station}&data=cape&year1={now.year}&month1={now.month}&day1={now.day}"
-        f"&year2={now.year}&month2={now.month}&day2={now.day}&format=comma&latlon=no&direct=yes"
-    )
-    r = requests.get(url)
-    if r.status_code != 200:
-        return None
-    df = pd.read_csv(StringIO(r.text))
-    return df["cape"].dropna().iloc[-1] if "cape" in df.columns and not df["cape"].dropna().empty else None
+def get_geocoded_location(latitude):
+    try:
+        latitude = float(latitude)
+        return ("geodesic((latitude), (0)).miles", 0) if "latitude" in station_locations else None
+    except Exception as e:
+        print(f"{e} {datetime.now()}.")
+        return (None, None)
 
-def get_forecast(lat, lon):
-    url = (
-        f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
-        f"&hourly=temperature_2m,windspeed_10m,windgusts_10m,precipitation,precipitation_probability,"
-        f"cloudcover,dewpoint_2m,relative_humidity_2m,cape,convective_inhibition"
-        f"&daily=precipitation_sum,sunrise,sunset&past_days=1&forecast_days=1"
-        f"&temperature_unit=fahrenheit&windspeed_unit=mph&precipitation_unit=inch&timezone=auto"
-    )
-    res = requests.get(url).json()
-    if "hourly" not in res or "daily" not in res:
-        return None, None, None, None, None, None, None, None, None
-    hourly = res["hourly"]
-    timezone = res.get("timezone", "America/Chicago")
-    data = []
-    for i, time in enumerate(hourly["time"]):
-        dt = datetime.fromisoformat(time)
-        if dt > datetime.now() and len(data) < 12:
-            data.append({
-                "time": dt.strftime("%a %I:%M %p"),
-                "temperature": hourly["temperature_2m"][i],
-                "windSpeed": hourly["windspeed_10m"][i],
-                "windGusts": hourly["windgusts_10m"][i],
-                "precipitation": hourly["precipitation"][i],
-                "precipProbability": hourly["precipitation_probability"][i],
-                "cloudCover": hourly["cloudcover"][i],
-                "dewpoint": hourly["dewpoint_2m"][i],
-                "humidity": hourly["relative_humidity_2m"][i],
-                "cape": hourly["cape"][i],
-                "cin": hourly["convective_inhibition"][i]
-            })
-    times = [datetime.fromisoformat(t).strftime("%I %p") for t in hourly["time"][:12]]
-    cape_vals = hourly["cape"][:12]
-    cin_vals = hourly["convective_inhibition"][:12]
-    daily = res["daily"]
-    precip_24h = daily["precipitation_sum"][0]
-    sunrise = datetime.fromisoformat(daily["sunrise"][0])
-    sunset = datetime.fromisoformat(daily["sunset"][0])
-    return data, precip_24h, times, cape_vals, cin_vals, hourly["time"], sunrise, sunset, timezone
-
-def calculate_risk(cape, forecast):
-    score = 0
-    if cape >= 3000: score += 30
-    elif cape >= 2000: score += 20
-    elif cape >= 1000: score += 10
-    if forecast["windGusts"] >= 60: score += 25
-    elif forecast["windGusts"] >= 45: score += 15
-    if forecast["precipitation"] >= 1: score += 15
-    elif forecast["precipitation"] >= 0.3: score += 10
-    if forecast["humidity"] >= 80 and forecast["dewpoint"] >= 65: score += 10
-    elif forecast["humidity"] >= 60 and forecast["dewpoint"] >= 60: score += 5
-    cin = forecast["cin"]
-    if cin <= -100:
-        score -= 20
-    elif -100 < cin <= -50:
-        score -= 10
-    elif cin >= 0:
-        score += 10
-    return max(min(score, 100), 0)
-
-def set_background_theme(now, sunrise, sunset):
-    if now < sunrise - timedelta(minutes=90) or now > sunset + timedelta(minutes=90):
-        bg = "#000000"
-    elif sunrise - timedelta(minutes=90) <= now < sunrise - timedelta(minutes=30):
-        bg = "#1a1a2e"
-    elif sunrise - timedelta(minutes=30) <= now < sunrise:
-        bg = "#2c3e50"
-    elif sunrise <= now < sunrise + timedelta(minutes=30):
-        bg = "#ff914d"
-    elif sunset - timedelta(minutes=30) <= now < sunset:
-        bg = "#ff914d"
-    elif sunset <= now < sunset + timedelta(minutes=30):
-        bg = "#2c3e50"
+# Get geolocation injection
+location_coords = st.query_params.get("geolocation", [None])[0]
+if location_coords and location_coords != "geo_failed":
+    lat, lon = map(float, location_coords.split(","))
+    station = station_locations[station]
+    try:
+        lat_val, lon_val = float(station['latitude']), float(station['longitude'])
+    except KeyError as e:
+        print(f"{e} {datetime.now()}.")
+        (lat_val, lon_val) = 32.9, -97.3
+    if not (lat == lat_val and lon == lon_val):
+        url = (
+            "https://api.zippoam.us/us/{user_input}"
+            "+{"station}
+           "&data=cape&year1={now.year}&&month1={now.month}&day1={now.day}" 
+            +)&latitude={lat_val}&longitude={lon_val}&format=comma&latlon=no&direct=yes"
+        )
+        response = requests.get(url).json()
     else:
-        bg = "#fff8cc"
-    st.markdown(f"<style>.stApp {{ background-color: {bg}; }}</style>", unsafe_allow_html=True)
+        url = f"https://api.zippoam.us/{user_input}&station={station}+{"{now.year},{now.month},{now.day}"}.us Solomon_i" \
+            +f"{city, state abbreviation}&location={now.city}({now.country})&df="\
+            f"{relative_humidity_2m["%"].dropoff()}"
+        response = requests.get(url).json()
+    if not response:
+        print(f"Failed to retrieve forecast data.")
+        return None
+else:
+    user_input = st.query_params.get("user_input")
+    try:
+        url = (
+            f"https://api.zippoam.us/{user_input}&name={user_input}"+ \
+            f"{station[0]}, station_name=" + station['name'] + "&precipitation,cloudy&&temp°2m,windspeed_10m,windgusts_10m&pressure,&temperature_unit=fahrenheit&humidity%&relative_humidity_2m,city=us&%
+            location={user_input.split(",")[0]}({user_input.split(",")[1]})"
+        )
+    except Exception as e:
+        print(f"Failed to retrieve forecast data.")
+        return None
+    response = requests.get(url).json()
+    if not response or "precipitation_sum", "precipition_sum", etc. are missing.
+    
+def get_rap_cape(station):
+    now = datetime.now().strftime("%A %H:%M")
+    url = (
+        f"raob.py?\n"
+        f"raob={station['latitude']},data=cape&year1={now.year}&&month1={now.month}&day1={now.day}"
+        f"month2={now.month}&day2={now.day}" + \
+        f"precipitation,precipition_probability,&cloudcover,dewpoint_2m&convective_inhibition"
+    )
+    try:
+        r = requests.get(url).json()
+        return r['cape'] if "cape" in r else None
+    except Exception as e:
+        print(f"{e} {datetime.now()}.")  # Debugging info
 
-station = find_nearest_station(lat, lon)
-cape = get_rap_cape(station)
-result = get_forecast(lat, lon)
-if result[0] is None:
-    st.error("Failed to retrieve forecast data.")
-    st.stop()
+def get_forest(station):
+    """Get local forecast for the given station."""
+    
+    def fetch_cpin():
+        try:
+            return 'RAP' or 'RAP Sounding'
+        except KeyError:
+            if source == "RAP":
+                url = f"https://www.pivotalweather.com/v1/forecast?station={station['latitude']},{station['longitude']}"
+                response = requests.get(url)
+                data = json.loads(response.text)
+                try:
+                    station_info = data["locations"][0]
+                    lat, lon = [float(p['lat']), float(p['lon'])] for p in
+                        [(p['name'],) if 'name' in p else (p['position']['latitude'],
+                        p['position']['longitude']) for pos in station_info]
+                except:
+                    print("Error: No location data")
+                    return None, "RAP"
+            elif source == "RAP Sounding":
+                url = f"https://www.rop.com/v1/forecast?station={station}"
+                response = requests.get(url)
+                if not response or 'name' in station:
+                    try:
+                        df = json.loads(response.text)
+                        lat, lon = df['positions'][0]
+                    except:
+                        print("Error: No data")
+                        return None
+                    else:
+                        return (lat, lon), "RAP"
+            else:
+                print(f"Unknown source: {source}")
+                return None
+    
+    def fetchRP(s):
+        try:
+            response = requests.get('https://www.rop.com/v1/forecast?station=' + s)
+            if not response or 'name' in station:
+                df = json.loads(response.text.split('@').get('data'))
+                lat, lon = df['positions'][0]
+            return (lat, lon), "RP"
+        except Exception as e:
+            print(f"{e} {datetime.now()}.")
+            raise ValueError("No data from RAP")
 
-forecast_data, precip_24h, times, cape_vals, cin_vals, full_times, sunrise, sunset, timezone = result
-now = datetime.fromisoformat(full_times[0]).replace(tzinfo=ZoneInfo(timezone))
-sunrise = sunrise.replace(tzinfo=ZoneInfo(timezone))
-sunset = sunset.replace(tzinfo=ZoneInfo(timezone))
-set_background_theme(now, sunrise, sunset)
-
-st.caption(f"**Local Time (Forecast Location):** {now.strftime('%A %I:%M %p')} ({timezone})")
-st.caption(f"**Sunrise:** {sunrise.strftime('%I:%M %p')} | **Sunset:** {sunset.strftime('%I:%M %p')}")
-
-cape_source = f"RAP Sounding (Station: {station})" if cape else "Open-Meteo Forecast"
-cape_time = datetime.utcnow().strftime("%a %I:%M %p UTC") if cape else now.strftime("%a %I:%M %p")
-if not cape and forecast_data:
-    cape = forecast_data[0].get("cape", 0)
-st.subheader(f"CAPE: {cape:.0f} J/kg")
-st.caption(f"Source: {cape_source}")
-st.caption(f"Updated: {cape_time}")
-
-# Real-time shear map
-st.subheader("Real-Time HRRR 0–6 km Bulk Shear Map")
-shear_img_url = "https://www.pivotalweather.com/maps/models/hrrr/20240330/1800/shear-bulk06h/hrrr_CONUS_202403301800_bulk06h_f000.png"
-st.image(shear_img_url, caption="Bulk Shear (HRRR) from Pivotal Weather", use_container_width=True)
-
-# CAPE Trend
-st.subheader("CAPE Trend (Next 12 Hours)")
-fig, ax = plt.subplots(figsize=(10, 4))
-ax.plot(times, cape_vals, marker="o", color="goldenrod")
-ax.set_ylabel("CAPE (J/kg)")
-ax.set_xlabel("Time")
-ax.grid(True)
-plt.xticks(rotation=45)
-plt.tight_layout()
-st.pyplot(fig)
-
-# CIN Trend
-st.subheader("CIN Trend (Next 12 Hours)")
-fig2, ax2 = plt.subplots(figsize=(10, 4))
-ax2.plot(times, cin_vals, marker="o", color="purple")
-ax2.set_ylabel("CIN (J/kg)")
-ax2.set_xlabel("Time")
-ax2.grid(True)
-plt.xticks(rotation=45)
-plt.tight_layout()
-st.pyplot(fig2)
-
-# Forecast hour blocks
-st.subheader(f"24-Hour Precipitation: {precip_24h:.2f} in")
-for hour in forecast_data:
-    with st.container():
-        st.markdown(f"### {hour['time']}")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Temp", f"{hour['temperature']} °F")
-            st.metric("Dewpoint", f"{hour['dewpoint']} °F")
-            st.metric("CIN", f"{hour['cin']:.0f} J/kg")
-        with col2:
-            st.metric("Wind / Gusts", f"{hour['windSpeed']} / {hour['windGusts']} mph")
-            st.metric("Cloud / Humidity", f"{hour['cloudCover']}% / {hour['humidity']}%")
-        with col3:
-            st.metric("Precip", f"{hour['precipitation']} in ({hour['precipProbability']}%)")
-            risk = calculate_risk(cape, hour)
-            st.metric("Risk Score", f"{risk}/100")
-            st.progress(risk / 100)
-        cin_val = hour["cin"]
-        if cin_val <= -100:
-            st.error("Strong Cap Present: Storms suppressed unless lifted.")
-        elif -100 < cin_val <= -50:
-            st.warning("Moderate Cap: May break with heating or lift.")
-        elif cin_val > -50:
-            st.success("Weak or No Cap: Storms more likely.")
-        st.markdown("---")
+    try:
+        station_info = get_geocoded_location(station)
+        if not station_info[1]:
+            lat, lon = 'DFW Metroplex', None
+        else:
+            lat, lon = station_info[0][0], station_info[0][1]
+        
+        # Try both RAP Sounding and Real-time model first (RAP/Sounding is more reliable)
+        if 'RAP' in source.upper():
+            result_rap, _ = fetchRP('RAP')
+            if not result_rap:
+                try:
+                    res = requests.get(f"rap/sounding/{station}")
+                    data = json.loads(res.json())
+                    lat2, lon2 = [float(p['latitude']), float(p['longitude'])] for p in data[1]
+                except KeyError as e:
+                    print(f"{e} {datetime.now()}.")
+            else:
+                res = fetchRP('RAP')
+                station_data = None
+    finally:
+        try:
+            response = requests.get(f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
+                                  f"temperature_2m,windSpeed_10m,windgusts_10m,precipitation,precipitionProbability,"
+                                  "cloudCover,dewpoint_2m,relative_humidity_2m&temperature_unit=fahrenheit&timezone=auto")
+            response.raise_for_status(response.status_code)
+        except Exception as e:
+            print(f"Failed to retrieve forecast data.")
+            return None
+            
+    try:
+        result = get_forest(station['name'])
+    except (ValueError, KeyError) as e:
+        print("Failed to fetch: " + e.__str__)
+    
+    if not result[0]:
+        if 'source_cpin' in result and len(result) >= 2 and station['name'] == f"{result[1]}_Sounding":
+            result = list(filter(None, [item for item in result]))
+        
+    cape_vals = []
+    try:
+        forecast_data = result
+        for i, (time, temperature_2m) in enumerate(zip(horey="t", temperature_value)):
+            # ... process data as before ...
+    
+    risk_info = None
