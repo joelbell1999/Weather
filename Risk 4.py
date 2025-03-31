@@ -211,24 +211,21 @@ for _, row in df.iterrows():
         cape_color = "#ff4d4d" if cape_val >= 3000 else "#ffaa00" if cape_val >= 1500 else "#2ecc71"
         cape_emoji = "🌪️" if cape_val >= 3000 else "⚠️" if cape_val >= 1500 else "✅"  # 🌪️ = Extreme, ⚠️ = Moderate, ✅ = Low
         cape_width = max(min(cape_val / 40, 100), 5)
-        st.markdown(f"{cape_emoji} <div style='margin-top: -8px; height: 12px; width: {cape_width}%; background-color: {cape_color}; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
-        st.markdown(f"<div style='margin-top: -8px; height: 12px; width: {cape_width}%; background-color: {cape_color}; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
+        st.markdown(f"{cape_emoji} <div style='margin-top: -8px; height: 12px; width: {cape_width}%; background-color: {cape_color}; border-radius: 6px; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
 
         # Shear Bar
         shear_val = row["shear"]
         shear_color = "#ff4d4d" if shear_val >= 40 else "#ffaa00" if shear_val >= 30 else "#2ecc71"
         shear_emoji = "💨" if shear_val >= 40 else "⚠️" if shear_val >= 30 else "✅"  # 💨 = High Shear, ⚠️ = Moderate, ✅ = Low
         shear_width = max(min(shear_val, 100), 5)
-        st.markdown(f"{shear_emoji} <div style='margin-top: -8px; height: 12px; width: {shear_width}%; background-color: {shear_color}; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
-        st.markdown(f"<div style='margin-top: -8px; height: 12px; width: {shear_width}%; background-color: {shear_color}; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
+        st.markdown(f"{shear_emoji} <div style='margin-top: -8px; height: 12px; width: {shear_width}%; background-color: {shear_color}; border-radius: 6px; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
 
         # SRH Bar
         srh_val = row["srh"]
         srh_color = "#ff4d4d" if srh_val >= 150 else "#ffaa00" if srh_val >= 100 else "#2ecc71"
         srh_emoji = "🌀" if srh_val >= 150 else "⚠️" if srh_val >= 100 else "✅"  # 🌀 = Strong SRH, ⚠️ = Elevated, ✅ = Calm
         srh_width = max(min(srh_val / 2, 100), 5)
-        st.markdown(f"{srh_emoji} <div style='margin-top: -8px; height: 12px; width: {srh_width}%; background-color: {srh_color}; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
-        st.markdown(f"<div style='margin-top: -8px; height: 12px; width: {srh_width}%; background-color: {srh_color}; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
+        st.markdown(f"{srh_emoji} <div style='margin-top: -8px; height: 12px; width: {srh_width}%; background-color: {srh_color}; border-radius: 6px; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
         st.markdown(f"<div style='margin-top: -8px; height: 12px; width: {srh_width}%; background-color: {srh_color};'></div>", unsafe_allow_html=True)
 
     st.markdown("---")
