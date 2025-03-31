@@ -88,12 +88,10 @@ shapefile_url = f"https://www.spc.noaa.gov/products/outlook/archive/{today[:4]}/
 used_yesterday = False
 try:
     gdf = gpd.read_file(shapefile_url)
-except:
-    from datetime import timedelta
+except Exception as e:
     yesterday = (date.today() - timedelta(days=1)).strftime("%Y%m%d")
     shapefile_url = f"https://www.spc.noaa.gov/products/outlook/archive/{yesterday[:4]}/day1otlk_cat_{yesterday}_1300.zip"
     used_yesterday = True
-    gdf = gpd.read_file(shapefile_url)
     gdf = gpd.read_file(shapefile_url)
     for _, row in gdf.iterrows():
         color_map = {
