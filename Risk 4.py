@@ -140,14 +140,7 @@ risk_chart.update_layout(
 )
 st.plotly_chart(risk_chart, use_container_width=True)
 
-# Animate severe risk trend with color-based emphasis
-for i, score in enumerate(df['risk']):
-    if score >= 70:
-        ax_risk.plot(i, score, marker='o', color='red', markersize=10)
-    elif score >= 40:
-        ax_risk.plot(i, score, marker='o', color='orange', markersize=8)
-    else:
-        ax_risk.plot(i, score, marker='o', color='green', markersize=6)
+
 
 # 🌅 Local time from first forecast entry
 timezone = "America/Chicago"
