@@ -101,7 +101,7 @@ if 'radar_last_refresh' not in st.session_state:
 
 if time() - st.session_state.radar_last_refresh > 60:
     st.session_state.radar_last_refresh = time()
-    st.experimental_rerun()
+    st.rerun()
 
 # 🌧 MRMS Radar Image (via NOAA)
 radar_url = f"https://radar.weather.gov/ridge/standard/KFWS_loop.gif?{int(time())}"
