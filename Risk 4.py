@@ -147,18 +147,35 @@ timezone = "America/Chicago"
 local_time = datetime.fromisoformat(hours[0]["time"]).replace(tzinfo=ZoneInfo(timezone))
 st.caption(f"**Local Forecast Time:** {local_time.strftime('%A %I:%M %p')} ({timezone})")
 
-# 📊 CAPE & CIN Trend
+# 📊 CAPE & CIN Trend (Plotly)
 st.subheader("CAPE & CIN Trend")
-fig, ax = plt.subplots(figsize=(10, 4))
-ax.plot(df["time"], df["cape"], label="CAPE", color="orange", marker="o")
-ax.set_ylabel("CAPE (J/kg)", color="orange")
-ax.tick_params(axis='y', labelcolor="orange")
-ax2 = ax.twinx()
-ax2.plot(df["time"], df["cin"], label="CIN", color="purple", linestyle="--", marker="o")
-ax2.set_ylabel("CIN (J/kg)", color="purple")
-ax2.tick_params(axis='y', labelcolor="purple")
-fig.autofmt_xdate()
-st.pyplot(fig)
+cape_cin_chart = go.Figure()
+cape_cin_chart.add_trace(go.Scatter(
+    x=df["time"],
+    y=df["cape"],
+    mode="lines+markers",
+    name="CAPE",
+    line=dict(color="orange"),
+    marker=dict(symbol="circle"),
+    hovertemplate="Time: %{x}<br>CAPE: %{y} J/kg<extra></extra>"
+))
+cape_cin_chart.add_trace(go.Scatter(
+    x=df["time"],
+    y=df["cin"],
+    mode="lines+markers",
+    name="CIN",
+    line=dict(color="purple", dash="dash"),
+    marker=dict(symbol="x"),
+    hovertemplate="Time: %{x}<br>CIN: %{y} J/kg<extra></extra>"
+))
+cape_cin_chart.update_layout(
+    yaxis=dict(title="J/kg"),
+    xaxis=dict(title="Time", tickangle=-45),
+    height=300,
+    margin=dict(l=20, r=20, t=30, b=80),
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+)
+st.plotly_chart(cape_cin_chart, use_container_width=True)
 
 # 📊 Hourly Forecast Breakdown
 st.subheader("Severe Weather Risk - Next 12 Hours")
