@@ -47,24 +47,29 @@ with st.container():
     folium.Marker([lat, lon], tooltip=f"{label}").add_to(m)
 
     # Add SPC surface boundaries
+@st.cache_data(ttl=300)
+def get_surface_boundaries():
     try:
-        boundary_data = requests.get("https://mesonet.agron.iastate.edu/geojson/surface_fronts.geojson", timeout=5).json()
-        for feature in boundary_data.get("features", []):
-            coords = feature["geometry"]["coordinates"]
-            for line in coords:
-                f_type = feature.get("properties", {}).get("type", "Boundary")
-                color_map = {
-                    "COLD": "blue",
-                    "WARM": "red",
-                    "STATIONARY": "purple",
-                    "DRYLINE": "orange"
-                }
-                line_color = color_map.get(f_type.upper(), "gray")
-                folium.PolyLine(locations=[(pt[1], pt[0]) for pt in line], color=line_color, weight=3, tooltip=f_type).add_to(m)
-    except Exception as e:
-        st.warning("Could not load surface boundaries.")
+        return requests.get("https://mesonet.agron.iastate.edu/geojson/surface_fronts.geojson", timeout=5).json()
+    except:
+        return None
 
-    st_data = st_folium(m, width=700, height=450, returned_objects=["last_center", "last_bounds", "zoom"])
+boundary_data = get_surface_boundaries()
+if boundary_data and "features" in boundary_data:
+    for feature in boundary_data.get("features", []):
+        coords = feature["geometry"]["coordinates"]
+        for line in coords:
+            f_type = feature.get("properties", {}).get("type", "Boundary")
+            color_map = {
+                "COLD": "blue",
+                "WARM": "red",
+                "STATIONARY": "purple",
+                "DRYLINE": "orange"
+            }
+            line_color = color_map.get(f_type.upper(), "gray")
+            folium.PolyLine(locations=[(pt[1], pt[0]) for pt in line], color=line_color, weight=3, tooltip=f_type).add_to(m)
+
+st_data = st_folium(m, width=700, height=450, returned_objects=["last_center", "last_bounds", "zoom"])
 
 # Sync map interaction with dashboard display
 if st_data and "last_center" in st_data:
@@ -72,18 +77,19 @@ if st_data and "last_center" in st_data:
     lon = st_data["last_center"][1]
 
 # 🧭 SPC Surface Boundary Layer
-try:
-    boundary_data = requests.get("https://mesonet.agron.iastate.edu/geojson/surface_fronts.geojson", timeout=5).json()
-    if "features" in boundary_data and boundary_data["features"]:
-        st.markdown("**🧭 Surface Boundaries from SPC**")
-        for front in boundary_data["features"]:
-            props = front.get("properties", {})
-            f_type = props.get("type", "Boundary")
-            f_label = props.get("label", "")
-            st.markdown(f"- {f_type}: {f_label}")
-except Exception as e:
+if boundary_data and "features" in boundary_data:
+    updated = boundary_data.get("features", [{}])[0].get("properties", {}).get("time", None)
+    if updated:
+        timestamp = datetime.fromtimestamp(updated / 1000).astimezone(ZoneInfo("America/Chicago"))
+        st.caption(f"Last updated: {timestamp.strftime('%b %d, %I:%M %p %Z')}")
+    st.markdown("**🧭 Surface Boundaries from SPC**")
+    for front in boundary_data["features"]:
+        props = front.get("properties", {})
+        f_type = props.get("type", "Boundary")
+        f_label = props.get("label", "")
+        st.markdown(f"- {f_type}: {f_label}")
+else:
     st.info("SPC surface boundary data currently unavailable.")
-    st.markdown("</div>", unsafe_allow_html=True)
 
 # 🚨 NWS Alerts Overlay
 alerts_url = f"https://api.weather.gov/alerts/active?point={lat},{lon}"
