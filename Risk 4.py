@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import matplotlib.pyplot as plt
+from time import time
 
 st.set_page_config("Severe Weather Dashboard", layout="centered")
 st.title("Severe Weather Dashboard (Powered by Tomorrow.io)")
@@ -37,7 +38,35 @@ def geocode_location(query):
 user_input = st.text_input("Enter ZIP Code or City, State", "76247")
 lat, lon, label = geocode_location(user_input)
 st.markdown(f"**Location:** {label}")
-st.map({"lat": [lat], "lon": [lon]})
+st.map({"lat": [lat], "lon": [lon]}, zoom=9, use_container_width=True)
+
+# 🚨 NWS Alerts Overlay
+alerts_url = f"https://api.weather.gov/alerts/active?point={lat},{lon}"
+alerts = requests.get(alerts_url).json()
+if "features" in alerts and alerts["features"]:
+    for alert in alerts["features"]:
+        event = alert["properties"].get("event", "Alert")
+        area = alert["properties"].get("areaDesc", "")
+        headline = alert["properties"].get("headline", "")
+        st.warning(f"{event} for {area}: {headline}")
+
+# ⏱ Radar Refresh Control
+if 'radar_last_refresh' not in st.session_state:
+    st.session_state.radar_last_refresh = time()
+
+if time() - st.session_state.radar_last_refresh > 60:
+    st.session_state.radar_last_refresh = time()
+    st.experimental_rerun()
+
+# 🌧 MRMS Radar Image (via NOAA)
+radar_url = f"https://radar.weather.gov/ridge/standard/KFWS_loop.gif?{int(time())}"
+st.image(radar_url, caption="NWS Radar (KFWS)", use_column_width=True)", use_column_width=True)
+
+# 🔥 Current Risk Bar
+current_risk = df.iloc[0]['risk']
+risk_color = '#ff4d4d' if current_risk >= 70 else '#ffaa00' if current_risk >= 40 else '#2ecc71'
+st.markdown(f"**Current Severe Weather Risk:** {current_risk}/100")
+st.markdown(f"<div style='height: 20px; width: {current_risk}%; background-color: {risk_color}; border-radius: 4px;'></div>", unsafe_allow_html=True)
 
 data = get_tomorrowio_data(lat, lon)
 if not data:
@@ -88,6 +117,17 @@ def calculate_risk(row):
 
 df["risk"] = df.apply(calculate_risk, axis=1)
 
+# 📈 Risk Trend Line
+st.subheader("Severe Weather Risk Trend")
+fig_risk, ax_risk = plt.subplots(figsize=(10, 2.5))
+ax_risk.plot(df["time"], df["risk"], color="#e74c3c", marker="o")
+ax_risk.set_ylim(0, 100)
+ax_risk.set_ylabel("Risk Score")
+ax_risk.set_xticks(range(len(df["time"])))
+ax_risk.set_xticklabels(df["time"], rotation=45, ha="right")
+ax_risk.grid(True)
+st.pyplot(fig_risk)
+
 # 🌅 Local time from first forecast entry
 timezone = "America/Chicago"
 local_time = datetime.fromisoformat(hours[0]["time"]).replace(tzinfo=ZoneInfo(timezone))
@@ -131,16 +171,19 @@ for _, row in df.iterrows():
         # CAPE bar
         cape_val = row["cape"]
         cape_color = "#ff4d4d" if cape_val >= 3000 else "#ffaa00" if cape_val >= 1500 else "#2ecc71"
-        st.markdown(f"<div style='height: 8px; width: {min(cape_val/40, 100)}%; background-color: {cape_color};'></div>", unsafe_allow_html=True)
+        cape_width = max(min(cape_val / 40, 100), 5)
+        st.markdown(f"<div style='margin-top: 4px; height: 12px; width: {cape_width}%; background-color: {cape_color};'></div>", unsafe_allow_html=True)
 
         # Shear bar
         shear_val = row["shear"]
         shear_color = "#ff4d4d" if shear_val >= 40 else "#ffaa00" if shear_val >= 30 else "#2ecc71"
-        st.markdown(f"<div style='height: 8px; width: {min(shear_val, 100)}%; background-color: {shear_color};'></div>", unsafe_allow_html=True)
+        shear_width = max(min(shear_val, 100), 5)
+        st.markdown(f"<div style='margin-top: 4px; height: 12px; width: {shear_width}%; background-color: {shear_color};'></div>", unsafe_allow_html=True)
 
         # SRH bar
         srh_val = row["srh"]
         srh_color = "#ff4d4d" if srh_val >= 150 else "#ffaa00" if srh_val >= 100 else "#2ecc71"
-        st.markdown(f"<div style='height: 8px; width: {min(srh_val/2, 100)}%; background-color: {srh_color};'></div>", unsafe_allow_html=True)
+        srh_width = max(min(srh_val / 2, 100), 5)
+        st.markdown(f"<div style='margin-top: 4px; height: 12px; width: {srh_width}%; background-color: {srh_color};'></div>", unsafe_allow_html=True)
 
     st.markdown("---")
