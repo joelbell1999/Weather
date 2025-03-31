@@ -39,9 +39,50 @@ def geocode_location(query):
 user_input = st.text_input("Enter ZIP Code or City, State", "76247")
 lat, lon, label = geocode_location(user_input)
 st.markdown(f"**Location:** {label}")
+import folium
+from streamlit_folium import st_folium
+
 with st.container():
-    st.markdown("<div style='transform: scale(0.5); transform-origin: top left;'>", unsafe_allow_html=True)
-    st.map({"lat": [lat], "lon": [lon]}, zoom=9, use_container_width=True)
+    m = folium.Map(location=[lat, lon], zoom_start=8, control_scale=True, prefer_canvas=True)
+    folium.Marker([lat, lon], tooltip=f"{label}").add_to(m)
+
+    # Add SPC surface boundaries
+    try:
+        boundary_data = requests.get("https://mesonet.agron.iastate.edu/geojson/surface_fronts.geojson", timeout=5).json()
+        for feature in boundary_data.get("features", []):
+            coords = feature["geometry"]["coordinates"]
+            for line in coords:
+                f_type = feature.get("properties", {}).get("type", "Boundary")
+                color_map = {
+                    "COLD": "blue",
+                    "WARM": "red",
+                    "STATIONARY": "purple",
+                    "DRYLINE": "orange"
+                }
+                line_color = color_map.get(f_type.upper(), "gray")
+                folium.PolyLine(locations=[(pt[1], pt[0]) for pt in line], color=line_color, weight=3, tooltip=f_type).add_to(m)
+    except Exception as e:
+        st.warning("Could not load surface boundaries.")
+
+    st_data = st_folium(m, width=700, height=450, returned_objects=["last_center", "last_bounds", "zoom"])
+
+# Sync map interaction with dashboard display
+if st_data and "last_center" in st_data:
+    lat = st_data["last_center"][0]
+    lon = st_data["last_center"][1]
+
+# 🧭 SPC Surface Boundary Layer
+try:
+    boundary_data = requests.get("https://mesonet.agron.iastate.edu/geojson/surface_fronts.geojson", timeout=5).json()
+    if "features" in boundary_data and boundary_data["features"]:
+        st.markdown("**🧭 Surface Boundaries from SPC**")
+        for front in boundary_data["features"]:
+            props = front.get("properties", {})
+            f_type = props.get("type", "Boundary")
+            f_label = props.get("label", "")
+            st.markdown(f"- {f_type}: {f_label}")
+except Exception as e:
+    st.info("SPC surface boundary data currently unavailable.")
     st.markdown("</div>", unsafe_allow_html=True)
 
 # 🚨 NWS Alerts Overlay
@@ -166,6 +207,38 @@ with cols[4]:
     cin_emoji = "✅" if cin_val >= -50 else "⚠️" if cin_val >= -100 else "⛔"
     cin_width = max(min(abs(cin_val) / 2, 100), 5)
     st.markdown(f"{cin_emoji} <div style='height: 12px; width: {cin_width}%; background-color: {cin_color}; border-radius: 6px; transition: width 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
+
+# 📡 SPC Mesoscale Discussion Trigger Check
+spc_mcd_url = "https://mesoanalysis.spc.noaa.gov/json/srh/srh_0_1km.json"
+try:
+    spc_response = requests.get(spc_mcd_url, timeout=5).json()
+    trigger_active = any(feature.get("properties", {}).get("value", 0) >= 100 for feature in spc_response.get("features", []))
+    if trigger_active:
+        st.markdown("### 🛰️ SPC Mesoanalysis Suggests Trigger Active")
+        st.markdown("Based on current SPC 0–1 km SRH values, a surface boundary or mesoscale trigger is likely influencing the area.")
+except Exception as e:
+    st.info("SPC mesoanalysis data currently unavailable. Falling back to internal trigger logic.")
+
+# 🧭 Trigger Potential Estimate (Fallback)
+trigger_score = 0
+if df["cin"].iloc[0] < -100 and df["cin"].iloc[1] > df["cin"].iloc[0]:
+    trigger_score += 1
+if df["dew"].iloc[1] - df["dew"].iloc[0] > 2:
+    trigger_score += 1
+if df["shear"].iloc[1] > df["shear"].iloc[0] and df["shear"].iloc[1] > 30:
+    trigger_score += 1
+if df["precip"].iloc[0] >= 0.05:
+    trigger_score += 1
+
+if trigger_score >= 3:
+    trigger_emoji, trigger_msg, trigger_color = "⛔", "Active trigger likely", "#ff4d4d"
+elif trigger_score == 2:
+    trigger_emoji, trigger_msg, trigger_color = "⚠️", "Trigger potential present", "#ffaa00"
+else:
+    trigger_emoji, trigger_msg, trigger_color = "✅", "No obvious trigger yet", "#2ecc71"
+
+st.markdown(f"**Trigger Mechanism Signal:** {trigger_msg}")
+st.markdown(f"{trigger_emoji} <div style='height: 20px; width: {trigger_score * 25}%; background-color: {trigger_color}; border-radius: 4px; transition: width 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
 
 # ✅ Storm Readiness Score (CAPE + CIN)
 readiness = row["cape"] - abs(row["cin"])
