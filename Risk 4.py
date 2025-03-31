@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 from time import time
 
 st.set_page_config("Severe Weather Dashboard", layout="centered")
@@ -118,16 +119,26 @@ risk_color = '#ff4d4d' if current_risk >= 70 else '#ffaa00' if current_risk >= 4
 st.markdown(f"**Current Severe Weather Risk:** {current_risk}/100")
 st.markdown(f"<div style='height: 20px; width: {current_risk}%; background-color: {risk_color}; border-radius: 4px; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
 
-# 📈 Risk Trend Line
+# 📈 Risk Trend Line (Plotly)
 st.subheader("Severe Weather Risk Trend")
-fig_risk, ax_risk = plt.subplots(figsize=(10, 2.5))
-ax_risk.plot(df["time"], df["risk"], color="#e74c3c", marker="o")
-ax_risk.set_ylim(0, 100)
-ax_risk.set_ylabel("Risk Score")
-ax_risk.set_xticks(range(len(df["time"])))
-ax_risk.set_xticklabels(df["time"], rotation=45, ha="right")
-ax_risk.grid(True)
-st.pyplot(fig_risk)
+risk_chart = go.Figure()
+risk_chart.add_trace(go.Scatter(
+    x=df["time"],
+    y=df["risk"],
+    mode="lines+markers",
+    line=dict(color="#e74c3c"),
+    marker=dict(size=10, color=df["risk"], colorscale="RdYlGn_r", showscale=True),
+    name="Risk Score",
+    hovertemplate="Time: %{x}<br>Risk: %{y}<extra></extra>"
+))
+risk_chart.update_layout(
+    yaxis=dict(title="Risk Score", range=[0, 100]),
+    xaxis=dict(title="Time", tickangle=-45),
+    height=300,
+    margin=dict(l=20, r=20, t=30, b=80),
+    showlegend=False
+)
+st.plotly_chart(risk_chart, use_container_width=True)
 
 # Animate severe risk trend with color-based emphasis
 for i, score in enumerate(df['risk']):
