@@ -50,7 +50,7 @@ with st.container():
 @st.cache_data(ttl=300)
 def get_surface_boundaries():
     try:
-        return requests.get("https://mesonet.agron.iastate.edu/geojson/surface_fronts.geojson", timeout=5).json()
+        return requests.get("https://www.spc.noaa.gov/products/fronts/fronts_latest.geojson", timeout=5).json()
     except:
         return None
 
@@ -75,6 +75,18 @@ st_data = st_folium(m, width=700, height=450, returned_objects=["last_center", "
 if st_data and "last_center" in st_data:
     lat = st_data["last_center"][0]
     lon = st_data["last_center"][1]
+
+# 🧭 SPC Outlook Overlay
+try:
+    spc_url = f"https://mesonet.agron.iastate.edu/json/spcoutlook.py?lon={lon}&lat={lat}&last=0&day=1&cat=categorical"
+    spc_outlook = requests.get(spc_url, timeout=5).json()
+    if spc_outlook and "day1" in spc_outlook:
+        area = spc_outlook["day1"].get("label", "No outlook")
+        st.markdown(f"**🗺️ SPC Day 1 Outlook (Categorical):** {area}")
+    else:
+        st.info("SPC outlook data not available.")
+except Exception as e:
+    st.warning("Failed to load SPC outlook data.")
 
 # 🧭 SPC Surface Boundary Layer
 if boundary_data and "features" in boundary_data:
