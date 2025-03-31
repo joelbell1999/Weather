@@ -84,7 +84,19 @@ try:
     from datetime import date
 
 today = date.today().strftime("%Y%m%d")
-shapefile_url = f"https://www.spc.noaa.gov/products/outlook/archive/{today[:4]}/day1otlk_cat_{today}_1300.zip""
+from pathlib import Path
+
+# Try today's file, fallback to yesterday if 404
+shapefile_url = f"https://www.spc.noaa.gov/products/outlook/archive/{today[:4]}/day1otlk_cat_{today}_1300.zip"
+used_yesterday = False
+try:
+    gdf = gpd.read_file(shapefile_url)
+except:
+    from datetime import timedelta
+    yesterday = (date.today() - timedelta(days=1)).strftime("%Y%m%d")
+    shapefile_url = f"https://www.spc.noaa.gov/products/outlook/archive/{yesterday[:4]}/day1otlk_cat_{yesterday}_1300.zip"
+    used_yesterday = True
+    gdf = gpd.read_file(shapefile_url)
     gdf = gpd.read_file(shapefile_url)
     for _, row in gdf.iterrows():
         color_map = {
@@ -108,6 +120,8 @@ shapefile_url = f"https://www.spc.noaa.gov/products/outlook/archive/{today[:4]}/
                 tooltip=row["LABEL"]
             ).add_to(m)
 except Exception as e:
+    if used_yesterday:
+        st.caption("⚠️ Using yesterday’s SPC outlook (today’s not yet available)")
     st.warning("SPC shapefile outlook overlay unavailable.")
 except Exception as e:
     st.warning("SPC categorical outlook image currently unavailable.")
