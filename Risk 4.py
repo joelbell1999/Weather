@@ -116,6 +116,14 @@ def calculate_risk(row):
 
 df["risk"] = df.apply(calculate_risk, axis=1)
 
+# ✅ Storm Readiness Score (CAPE + CIN)
+readiness = row["cape"] - abs(row["cin"])
+readiness_color = "#ff4d4d" if readiness < 500 else "#ffaa00" if readiness < 1000 else "#2ecc71"
+readiness_emoji = "⛔" if readiness < 500 else "⚠️" if readiness < 1000 else "✅"
+readiness_width = max(min(readiness / 40, 100), 5)
+st.markdown(f"**Storm Readiness:** {readiness:.0f} (CAPE - |CIN|)")
+st.markdown(f"{readiness_emoji} <div style='height: 20px; width: {readiness_width}%; background-color: {readiness_color}; border-radius: 4px; transition: width 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
+
 # 🔥 Current Risk Bar
 current_risk = df.iloc[0]["risk"]
 risk_color = '#ff4d4d' if current_risk >= 70 else '#ffaa00' if current_risk >= 40 else '#2ecc71'
@@ -126,7 +134,7 @@ st.markdown(f"<div style='height: 20px; width: {current_risk}%; background-color
 st.markdown("## Current Severe Indices")
 row = df.iloc[0]
 
-cols = st.columns(3)
+cols = st.columns(5)
 
 # CAPE
 with cols[0]:
@@ -157,6 +165,26 @@ with cols[2]:
     srh_emoji = "🌀" if srh_val >= 150 else "⚠️" if srh_val >= 100 else "✅"
     srh_width = max(min(srh_val / 2, 100), 5)
     st.markdown(f"{srh_emoji} <div style='height: 12px; width: {srh_width}%; background-color: {srh_color}; border-radius: 6px; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
+
+# Dew Point
+with cols[3]:
+    st.markdown(f"**Dew Point**")
+    st.markdown(f"<div style='font-size: 28px'>{row['dew']:.0f} °F</div>", unsafe_allow_html=True)
+    dew_val = row["dew"]
+    dew_color = "#ff4d4d" if dew_val >= 70 else "#ffaa00" if dew_val >= 60 else "#2ecc71"
+    dew_emoji = "💧" if dew_val >= 70 else "⚠️" if dew_val >= 60 else "✅"
+    dew_width = max(min((dew_val - 50) * 4, 100), 5)
+    st.markdown(f"{dew_emoji} <div style='height: 12px; width: {dew_width}%; background-color: {dew_color}; border-radius: 6px; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
+
+# CIN
+with cols[4]:
+    st.markdown(f"**CIN**")
+    st.markdown(f"<div style='font-size: 28px'>{row['cin']:.0f} J/kg</div>", unsafe_allow_html=True)
+    cin_val = row["cin"]
+    cin_color = "#2ecc71" if cin_val >= -50 else "#ffaa00" if cin_val >= -100 else "#ff4d4d"
+    cin_emoji = "✅" if cin_val >= -50 else "⚠️" if cin_val >= -100 else "⛔"
+    cin_width = max(min(abs(cin_val) / 2, 100), 5)
+    st.markdown(f"{cin_emoji} <div style='height: 12px; width: {cin_width}%; background-color: {cin_color}; border-radius: 6px; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
 
 # 📊 CAPE & CIN Trend (Plotly)
 st.subheader("CAPE & CIN Trend")
