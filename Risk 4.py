@@ -121,7 +121,7 @@ row = df.iloc[0]
 # ✅ Storm Readiness Score (CAPE + CIN)
 readiness = row["cape"] - abs(row["cin"])
 readiness_color = "#ff4d4d" if readiness < 500 else "#ffaa00" if readiness < 1000 else "#2ecc71"
-readiness_emoji = "⛔" if readiness < 500 else "⚠️" if readiness < 1000 else "✅"
+readiness_emoji = "✅" if readiness < 500 else "⚠️" if readiness < 1000 else "⛔"
 readiness_width = max(min(readiness / 40, 100), 5)
 st.markdown(f"**Storm Readiness:** {readiness:.0f} (CAPE - |CIN|)")
 st.markdown(f"{readiness_emoji} <div style='height: 20px; width: {readiness_width}%; background-color: {readiness_color}; border-radius: 4px; transition: width 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
@@ -132,61 +132,26 @@ risk_color = '#ff4d4d' if current_risk >= 70 else '#ffaa00' if current_risk >= 4
 st.markdown(f"**Current Severe Weather Risk:** {current_risk}/100")
 st.markdown(f"<div style='height: 20px; width: {current_risk}%; background-color: {risk_color}; border-radius: 4px; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
 
-# 🌪️🌡️ CAPE / Shear / SRH Display
-st.markdown("## Current Severe Indices")
-row = df.iloc[0]
-
-cols = st.columns(5)
-
-# CAPE
-with cols[0]:
-    st.markdown(f"**CAPE**")
-    st.markdown(f"<div style='font-size: 28px'>{row['cape']:.0f} J/kg</div>", unsafe_allow_html=True)
-    cape_val = row["cape"]
-    cape_color = "#ff4d4d" if cape_val >= 3000 else "#ffaa00" if cape_val >= 1500 else "#2ecc71"
-    cape_emoji = "🌪️" if cape_val >= 3000 else "⚠️" if cape_val >= 1500 else "✅"
-    cape_width = max(min(cape_val / 40, 100), 5)
-    st.markdown(f"{cape_emoji} <div style='height: 12px; width: {cape_width}%; background-color: {cape_color}; border-radius: 6px; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
-
-# Shear
-with cols[1]:
-    st.markdown(f"**Shear (ΔSpeed)**")
-    st.markdown(f"<div style='font-size: 28px'>{row['shear']:.1f} mph</div>", unsafe_allow_html=True)
-    shear_val = row["shear"]
-    shear_color = "#ff4d4d" if shear_val >= 40 else "#ffaa00" if shear_val >= 30 else "#2ecc71"
-    shear_emoji = "💨" if shear_val >= 40 else "⚠️" if shear_val >= 30 else "✅"
-    shear_width = max(min(shear_val, 100), 5)
-    st.markdown(f"{shear_emoji} <div style='height: 12px; width: {shear_width}%; background-color: {shear_color}; border-radius: 6px; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
-
-# SRH
-with cols[2]:
-    st.markdown(f"**SRH**")
-    st.markdown(f"<div style='font-size: 28px'>{row['srh']:.0f} m²/s²</div>", unsafe_allow_html=True)
-    srh_val = row["srh"]
-    srh_color = "#ff4d4d" if srh_val >= 150 else "#ffaa00" if srh_val >= 100 else "#2ecc71"
-    srh_emoji = "🌀" if srh_val >= 150 else "⚠️" if srh_val >= 100 else "✅"
-    srh_width = max(min(srh_val / 2, 100), 5)
-    st.markdown(f"{srh_emoji} <div style='height: 12px; width: {srh_width}%; background-color: {srh_color}; border-radius: 6px; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
-
-# Dew Point
-with cols[3]:
-    st.markdown(f"**Dew Point**")
-    st.markdown(f"<div style='font-size: 28px'>{row['dew']:.0f} °F</div>", unsafe_allow_html=True)
-    dew_val = row["dew"]
-    dew_color = "#ff4d4d" if dew_val >= 70 else "#ffaa00" if dew_val >= 60 else "#2ecc71"
-    dew_emoji = "💧" if dew_val >= 70 else "⚠️" if dew_val >= 60 else "✅"
-    dew_width = max(min((dew_val - 50) * 4, 100), 5)
-    st.markdown(f"{dew_emoji} <div style='height: 12px; width: {dew_width}%; background-color: {dew_color}; border-radius: 6px; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
-
-# CIN
-with cols[4]:
-    st.markdown(f"**CIN**")
-    st.markdown(f"<div style='font-size: 28px'>{row['cin']:.0f} J/kg</div>", unsafe_allow_html=True)
-    cin_val = row["cin"]
-    cin_color = "#2ecc71" if cin_val >= -50 else "#ffaa00" if cin_val >= -100 else "#ff4d4d"
-    cin_emoji = "✅" if cin_val >= -50 else "⚠️" if cin_val >= -100 else "⛔"
-    cin_width = max(min(abs(cin_val) / 2, 100), 5)
-    st.markdown(f"{cin_emoji} <div style='height: 12px; width: {cin_width}%; background-color: {cin_color}; border-radius: 6px; transition: width 0.8s ease-in-out, background-color 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
+# 📈 Risk Trend Line (Plotly)
+st.subheader("Severe Weather Risk Trend")
+risk_chart = go.Figure()
+risk_chart.add_trace(go.Scatter(
+    x=df["time"],
+    y=df["risk"],
+    mode="lines+markers",
+    line=dict(color="#e74c3c"),
+    marker=dict(size=10, color=df["risk"], colorscale="RdYlGn_r", showscale=True),
+    name="Risk Score",
+    hovertemplate="Time: %{x}<br>Risk: %{y}<extra></extra>"
+))
+risk_chart.update_layout(
+    yaxis=dict(title="Risk Score", range=[0, 100]),
+    xaxis=dict(title="Time", tickangle=-45),
+    height=300,
+    margin=dict(l=20, r=20, t=30, b=80),
+    showlegend=False
+)
+st.plotly_chart(risk_chart, use_container_width=True)
 
 # 📊 CAPE & CIN Trend (Plotly)
 st.subheader("CAPE & CIN Trend")
@@ -217,5 +182,3 @@ cape_cin_chart.update_layout(
     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
 )
 st.plotly_chart(cape_cin_chart, use_container_width=True)
-
-# ℹ️ Legend
