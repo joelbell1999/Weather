@@ -35,9 +35,7 @@ from bs4 import BeautifulSoup
 import re
 import time
 import matplotlib.pyplot as plt
-
-# ---- TYPE HINTS ----
-from typing import Optional, Any  # Still needed for special cases
+from typing import Optional, Any
 
 # ---- CONSTANTS ----
 API_TIMEOUT = 15  # seconds
@@ -102,7 +100,7 @@ def get_user_location() -> tuple[float, float, str]:
 # ---- WEATHER DATA FUNCTIONS ----
 @st.cache_data(ttl=CACHE_TTL)
 def scrape_pivotal_metrics() -> Optional[dict[str, Any]]:
-    """Scrape CAPE and wind shear from Pivotal Weather"""
+    """Scrape CAPE and wind shear from Pivotal Weather with robust error handling"""
     headers = {
         "User-Agent": "DFW Severe Weather Dashboard (Contact: admin@example.com)",
         "Accept-Language": "en-US"
@@ -113,21 +111,62 @@ def scrape_pivotal_metrics() -> Optional[dict[str, Any]]:
         cape_url = "https://www.pivotalweather.com/model.php?m=hrrr&p=sfc_cape"
         response = requests.get(cape_url, headers=headers, timeout=API_TIMEOUT)
         response.raise_for_status()
+        
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Extract CAPE value (example parsing - adjust selectors as needed)
-        cape_value = float(soup.find("div", class_="data-value").text.split()[0])
+        # Safely extract CAPE value
+        cape_div = soup.find("div", class_="parameter-value", attrs={"data-parameter": "cape"})
+        if not cape_div:
+            raise ValueError("CAPE value element not found")
+            
+        cape_match = re.search(r"(\d+)", cape_div.text)
+        if not cape_match:
+            raise ValueError("Could not parse CAPE value")
+            
+        cape_value = float(cape_match.group(1))
         
-        # Get shear value
-        shear_value = 35.0  # Placeholder - implement actual scraping
+        # Extract shear value
+        shear_div = soup.find("div", class_="parameter-value", attrs={"data-parameter": "shear_06km"})
+        if not shear_div:
+            raise ValueError("Shear value element not found")
+            
+        shear_match = re.search(r"(\d+)", shear_div.text)
+        if not shear_match:
+            raise ValueError("Could not parse shear value")
+            
+        shear_value = float(shear_match.group(1)) * 1.15078  # Convert knots to mph
+        
         return {
             "cape_jkg": cape_value,
             "shear_mph": shear_value,
             "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "source": "Pivotal Weather HRRR"
         }
+        
     except Exception as e:
         st.error(f"⚠️ Scraping failed: {str(e)}")
+        return None
+
+@st.cache_data(ttl=CACHE_TTL)
+def get_nws_severe_data(lat: float, lon: float) -> Optional[dict[str, Any]]:
+    """Get severe weather data from NWS API"""
+    try:
+        points_url = f"https://api.weather.gov/points/{lat},{lon}"
+        points_resp = requests.get(points_url, timeout=API_TIMEOUT)
+        points_resp.raise_for_status()
+        grid_url = points_resp.json()["properties"]["forecastGridData"]
+        
+        grid_resp = requests.get(grid_url, timeout=API_TIMEOUT)
+        grid_resp.raise_for_status()
+        data = grid_resp.json()["properties"]
+        
+        return {
+            "cape_jkg": data["convectiveAvailablePotentialEnergy"]["values"][0]["value"],
+            "shear_mph": data["windGust"]["values"][0]["value"],
+            "source": "NWS API"
+        }
+    except Exception as e:
+        st.warning(f"NWS API failed: {str(e)}")
         return None
 
 @st.cache_data(ttl=CACHE_TTL)
@@ -182,6 +221,33 @@ def get_forecast(lat: float, lon: float) -> tuple[Optional[list[dict[str, Any]]]
         st.error(f"Forecast failed: {str(e)}")
         return (None,) * 9
 
+def get_severe_metrics(lat: float, lon: float) -> dict[str, Any]:
+    """Get metrics with hierarchical fallback logic"""
+    # Try scraping first
+    scraped = scrape_pivotal_metrics()
+    if scraped:
+        return scraped
+    
+    # Fallback to NWS
+    nws_data = get_nws_severe_data(lat, lon)
+    if nws_data:
+        return nws_data
+    
+    # Final fallback to Open-Meteo
+    forecast = get_forecast(lat, lon)
+    if forecast[0]:
+        return {
+            "cape_jkg": forecast[0][0]["cape"],
+            "shear_mph": forecast[0][0]["windgusts_10m"],
+            "source": "Open-Meteo Forecast"
+        }
+    
+    return {
+        "cape_jkg": 0,
+        "shear_mph": 0,
+        "source": "No data available"
+    }
+
 # ---- VISUALIZATION FUNCTIONS ----
 def plot_weather_trend(times: list[str], values: list[float],
                       title: str, color: str, ylabel: str) -> plt.Figure:
@@ -218,6 +284,8 @@ def set_background_theme(now: datetime, sunrise: datetime, sunset: datetime):
 
 # ---- MAIN APPLICATION ----
 def main():
+    st.title("Severe Weather Dashboard")
+    
     # Get location
     with st.spinner("Detecting location..."):
         lat, lon, label = get_user_location()
@@ -227,41 +295,53 @@ def main():
     
     # Get weather data
     with st.spinner("Fetching weather data..."):
-        metrics = scrape_pivotal_metrics() or {
-            "cape_jkg": 0,
-            "shear_mph": 0,
-            "source": "Fallback"
-        }
-        
+        metrics = get_severe_metrics(lat, lon)
         forecast = get_forecast(lat, lon)
+        
         if None in forecast:
-            st.error("Data unavailable")
+            st.error("Critical forecast data unavailable")
             return
             
         hourly, precip_24h, times, cape_vals, cin_vals, full_times, sunrise, sunset, tz = forecast
         
-    # Display data
+    # Set timezone-aware datetime objects
     now = datetime.fromisoformat(full_times[0]).replace(tzinfo=ZoneInfo(tz))
-    set_background_theme(now, sunrise.replace(tzinfo=ZoneInfo(tz)), sunset.replace(tzinfo=ZoneInfo(tz)))
+    sunrise = sunrise.replace(tzinfo=ZoneInfo(tz))
+    sunset = sunset.replace(tzinfo=ZoneInfo(tz))
+    set_background_theme(now, sunrise, sunset)
     
+    # Display metrics
     col1, col2 = st.columns(2)
     with col1:
-        st.metric("CAPE", f"{metrics['cape_jkg']} J/kg")
+        st.metric("CAPE", f"{metrics['cape_jkg']} J/kg", 
+                 help="Convective Available Potential Energy")
     with col2:
-        st.metric("0-6km Shear", f"{metrics['shear_mph']:.1f} mph")
+        st.metric("0-6km Shear", f"{metrics['shear_mph']:.1f} mph",
+                 help="Bulk wind shear (storm organization potential)")
+    st.caption(f"Source: {metrics['source']} | Last updated: {metrics.get('last_updated', 'N/A')}")
     
-    st.pyplot(plot_weather_trend(times, cape_vals, "CAPE Trend", "red", "CAPE (J/kg)"))
-    st.pyplot(plot_weather_trend(times, cin_vals, "CIN Trend", "blue", "CIN (J/kg)"))
+    # Display trends
+    st.subheader("Atmospheric Trends")
+    trend_col1, trend_col2 = st.columns(2)
+    with trend_col1:
+        st.pyplot(plot_weather_trend(times, cape_vals, "CAPE Trend", "red", "CAPE (J/kg)"))
+    with trend_col2:
+        st.pyplot(plot_weather_trend(times, cin_vals, "CIN Trend", "blue", "CIN (J/kg)"))
     
-    for hour in hourly:
-        with st.expander(hour["time"]):
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Temp", f"{hour['temperature']}°F")
+    # Display forecast
+    st.subheader("Hourly Forecast")
+    for hour in hourly[:12]:  # Show next 12 hours
+        with st.expander(hour["time"], expanded=False):
+            cols = st.columns(3)
+            with cols[0]:
+                st.metric("Temperature", f"{hour['temperature']}°F")
+                st.metric("Dewpoint", f"{hour['dewpoint']}°F")
+            with cols[1]:
                 st.metric("Wind", f"{hour['windSpeed']}/{hour['windGusts']} mph")
-            with col2:
-                st.metric("Precip", f"{hour['precipitation']} in")
                 st.metric("Humidity", f"{hour['humidity']}%")
+            with cols[2]:
+                st.metric("Precip", f"{hour['precipitation']} in")
+                st.metric("Cloud Cover", f"{hour['cloudCover']}%")
 
 if __name__ == "__main__":
     main()
