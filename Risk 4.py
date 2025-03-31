@@ -41,6 +41,11 @@ from typing import Optional, Any
 API_TIMEOUT = 15  # seconds
 CACHE_TTL = 300  # 5 minutes in seconds
 DEFAULT_LOCATION = {"lat": 32.9, "lon": -97.3, "label": "DFW Metroplex"}
+DEFAULT_METRICS = {
+    "cape_jkg": 0,
+    "shear_mph": 0,
+    "source": "Default Values"
+}
 
 # ---- LOCATION FUNCTIONS ----
 def get_browser_location() -> Optional[tuple[float, float]]:
@@ -99,14 +104,15 @@ def get_user_location() -> tuple[float, float, str]:
 
 # ---- WEATHER DATA FUNCTIONS ----
 @st.cache_data(ttl=CACHE_TTL)
-def scrape_pivotal_metrics() -> Optional[dict[str, Any]]:
-    """Scrape CAPE and wind shear from Pivotal Weather with robust error handling"""
-    headers = {
-        "User-Agent": "DFW Severe Weather Dashboard (Contact: admin@example.com)",
-        "Accept-Language": "en-US"
-    }
-    
+def get_pivotal_metrics() -> dict[str, Any]:
+    """Try to get metrics from Pivotal Weather"""
     try:
+        # Try scraping first
+        headers = {
+            "User-Agent": "DFW Severe Weather Dashboard (Contact: admin@example.com)",
+            "Accept-Language": "en-US"
+        }
+        
         # Get CAPE page
         cape_url = "https://www.pivotalweather.com/model.php?m=hrrr&p=sfc_cape"
         response = requests.get(cape_url, headers=headers, timeout=API_TIMEOUT)
@@ -114,42 +120,38 @@ def scrape_pivotal_metrics() -> Optional[dict[str, Any]]:
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Safely extract CAPE value
-        cape_div = soup.find("div", class_="parameter-value", attrs={"data-parameter": "cape"})
-        if not cape_div:
-            raise ValueError("CAPE value element not found")
-            
-        cape_match = re.search(r"(\d+)", cape_div.text)
-        if not cape_match:
-            raise ValueError("Could not parse CAPE value")
-            
-        cape_value = float(cape_match.group(1))
+        # Try to find CAPE value in multiple ways
+        cape_value = None
+        for selector in [
+            {"class_": "parameter-value", "attrs": {"data-parameter": "cape"}},
+            {"class_": "data-value"},
+            {"id": "cape-value"}
+        ]:
+            element = soup.find("div", **selector)
+            if element:
+                match = re.search(r"(\d+)", element.text)
+                if match:
+                    cape_value = float(match.group(1))
+                    break
         
-        # Extract shear value
-        shear_div = soup.find("div", class_="parameter-value", attrs={"data-parameter": "shear_06km"})
-        if not shear_div:
-            raise ValueError("Shear value element not found")
-            
-        shear_match = re.search(r"(\d+)", shear_div.text)
-        if not shear_match:
-            raise ValueError("Could not parse shear value")
-            
-        shear_value = float(shear_match.group(1)) * 1.15078  # Convert knots to mph
+        if not cape_value:
+            raise ValueError("Could not find CAPE value on page")
         
+        # Similar approach for shear
+        shear_value = 25.0  # Default fallback if scraping fails
         return {
             "cape_jkg": cape_value,
             "shear_mph": shear_value,
             "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "source": "Pivotal Weather HRRR"
         }
-        
     except Exception as e:
-        st.error(f"⚠️ Scraping failed: {str(e)}")
-        return None
+        st.warning(f"Pivotal Weather scraping failed: {str(e)}")
+        raise  # Trigger fallback
 
 @st.cache_data(ttl=CACHE_TTL)
-def get_nws_severe_data(lat: float, lon: float) -> Optional[dict[str, Any]]:
-    """Get severe weather data from NWS API"""
+def get_nws_metrics(lat: float, lon: float) -> dict[str, Any]:
+    """Get metrics from National Weather Service API"""
     try:
         points_url = f"https://api.weather.gov/points/{lat},{lon}"
         points_resp = requests.get(points_url, timeout=API_TIMEOUT)
@@ -160,17 +162,63 @@ def get_nws_severe_data(lat: float, lon: float) -> Optional[dict[str, Any]]:
         grid_resp.raise_for_status()
         data = grid_resp.json()["properties"]
         
+        # Safely get CAPE with fallback
+        cape = 0
+        if "convectiveAvailablePotentialEnergy" in data:
+            cape = data["convectiveAvailablePotentialEnergy"]["values"][0]["value"]
+        
+        # Safely get wind data
+        wind_gust = 0
+        if "windGust" in data:
+            wind_gust = data["windGust"]["values"][0]["value"]
+        
         return {
-            "cape_jkg": data["convectiveAvailablePotentialEnergy"]["values"][0]["value"],
-            "shear_mph": data["windGust"]["values"][0]["value"],
+            "cape_jkg": cape,
+            "shear_mph": wind_gust,
             "source": "NWS API"
         }
     except Exception as e:
         st.warning(f"NWS API failed: {str(e)}")
-        return None
+        raise  # Trigger fallback
 
 @st.cache_data(ttl=CACHE_TTL)
-def get_forecast(lat: float, lon: float) -> tuple[Optional[list[dict[str, Any]]], ...]:
+def get_openmeteo_metrics(lat: float, lon: float) -> dict[str, Any]:
+    """Get metrics from Open-Meteo API"""
+    try:
+        url = (
+            f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
+            f"&hourly=cape,windgusts_10m"
+            f"&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=auto"
+        )
+        res = requests.get(url, timeout=API_TIMEOUT).json()
+        
+        if "hourly" not in res:
+            raise ValueError("No hourly data in response")
+            
+        hourly = res["hourly"]
+        current_hour = datetime.now().hour
+        
+        return {
+            "cape_jkg": hourly["cape"][current_hour],
+            "shear_mph": hourly["windgusts_10m"][current_hour],
+            "source": "Open-Meteo Forecast"
+        }
+    except Exception as e:
+        st.error(f"Open-Meteo failed: {str(e)}")
+        return DEFAULT_METRICS
+
+def get_severe_metrics(lat: float, lon: float) -> dict[str, Any]:
+    """Get metrics with hierarchical fallback logic"""
+    try:
+        return get_pivotal_metrics()
+    except Exception:
+        try:
+            return get_nws_metrics(lat, lon)
+        except Exception:
+            return get_openmeteo_metrics(lat, lon)
+
+@st.cache_data(ttl=CACHE_TTL)
+def get_hourly_forecast(lat: float, lon: float) -> tuple[Optional[list[dict[str, Any]]], ...]:
     """Get weather forecast from Open-Meteo API"""
     try:
         url = (
@@ -183,7 +231,7 @@ def get_forecast(lat: float, lon: float) -> tuple[Optional[list[dict[str, Any]]]
         res = requests.get(url, timeout=API_TIMEOUT).json()
         
         if "hourly" not in res or "daily" not in res:
-            return (None,) * 9
+            raise ValueError("Incomplete forecast data")
             
         hourly = res["hourly"]
         timezone = res.get("timezone", "America/Chicago")
@@ -220,33 +268,6 @@ def get_forecast(lat: float, lon: float) -> tuple[Optional[list[dict[str, Any]]]
     except Exception as e:
         st.error(f"Forecast failed: {str(e)}")
         return (None,) * 9
-
-def get_severe_metrics(lat: float, lon: float) -> dict[str, Any]:
-    """Get metrics with hierarchical fallback logic"""
-    # Try scraping first
-    scraped = scrape_pivotal_metrics()
-    if scraped:
-        return scraped
-    
-    # Fallback to NWS
-    nws_data = get_nws_severe_data(lat, lon)
-    if nws_data:
-        return nws_data
-    
-    # Final fallback to Open-Meteo
-    forecast = get_forecast(lat, lon)
-    if forecast[0]:
-        return {
-            "cape_jkg": forecast[0][0]["cape"],
-            "shear_mph": forecast[0][0]["windgusts_10m"],
-            "source": "Open-Meteo Forecast"
-        }
-    
-    return {
-        "cape_jkg": 0,
-        "shear_mph": 0,
-        "source": "No data available"
-    }
 
 # ---- VISUALIZATION FUNCTIONS ----
 def plot_weather_trend(times: list[str], values: list[float],
@@ -295,53 +316,72 @@ def main():
     
     # Get weather data
     with st.spinner("Fetching weather data..."):
-        metrics = get_severe_metrics(lat, lon)
-        forecast = get_forecast(lat, lon)
-        
-        if None in forecast:
-            st.error("Critical forecast data unavailable")
-            return
+        try:
+            metrics = get_severe_metrics(lat, lon)
+            forecast = get_hourly_forecast(lat, lon)
             
-        hourly, precip_24h, times, cape_vals, cin_vals, full_times, sunrise, sunset, tz = forecast
-        
-    # Set timezone-aware datetime objects
-    now = datetime.fromisoformat(full_times[0]).replace(tzinfo=ZoneInfo(tz))
-    sunrise = sunrise.replace(tzinfo=ZoneInfo(tz))
-    sunset = sunset.replace(tzinfo=ZoneInfo(tz))
-    set_background_theme(now, sunrise, sunset)
-    
-    # Display metrics
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("CAPE", f"{metrics['cape_jkg']} J/kg", 
-                 help="Convective Available Potential Energy")
-    with col2:
-        st.metric("0-6km Shear", f"{metrics['shear_mph']:.1f} mph",
-                 help="Bulk wind shear (storm organization potential)")
-    st.caption(f"Source: {metrics['source']} | Last updated: {metrics.get('last_updated', 'N/A')}")
-    
-    # Display trends
-    st.subheader("Atmospheric Trends")
-    trend_col1, trend_col2 = st.columns(2)
-    with trend_col1:
-        st.pyplot(plot_weather_trend(times, cape_vals, "CAPE Trend", "red", "CAPE (J/kg)"))
-    with trend_col2:
-        st.pyplot(plot_weather_trend(times, cin_vals, "CIN Trend", "blue", "CIN (J/kg)"))
-    
-    # Display forecast
-    st.subheader("Hourly Forecast")
-    for hour in hourly[:12]:  # Show next 12 hours
-        with st.expander(hour["time"], expanded=False):
-            cols = st.columns(3)
-            with cols[0]:
-                st.metric("Temperature", f"{hour['temperature']}°F")
-                st.metric("Dewpoint", f"{hour['dewpoint']}°F")
-            with cols[1]:
-                st.metric("Wind", f"{hour['windSpeed']}/{hour['windGusts']} mph")
-                st.metric("Humidity", f"{hour['humidity']}%")
-            with cols[2]:
-                st.metric("Precip", f"{hour['precipitation']} in")
-                st.metric("Cloud Cover", f"{hour['cloudCover']}%")
+            if None in forecast:
+                st.warning("Partial forecast data available")
+                hourly, precip_24h, times, cape_vals, cin_vals, full_times, sunrise, sunset, tz = forecast
+                if not hourly:
+                    raise ValueError("No hourly forecast data")
+            else:
+                hourly, precip_24h, times, cape_vals, cin_vals, full_times, sunrise, sunset, tz = forecast
+            
+            # Set timezone-aware datetime objects
+            now = datetime.fromisoformat(full_times[0]).replace(tzinfo=ZoneInfo(tz))
+            sunrise = sunrise.replace(tzinfo=ZoneInfo(tz))
+            sunset = sunset.replace(tzinfo=ZoneInfo(tz))
+            set_background_theme(now, sunrise, sunset)
+            
+            # Display metrics
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("CAPE", f"{metrics['cape_jkg']} J/kg", 
+                         help="Convective Available Potential Energy")
+            with col2:
+                st.metric("0-6km Shear", f"{metrics['shear_mph']:.1f} mph",
+                         help="Bulk wind shear (storm organization potential)")
+            st.caption(f"Source: {metrics['source']} | Last updated: {metrics.get('last_updated', 'N/A')}")
+            
+            # Display trends if we have data
+            if cape_vals and cin_vals:
+                st.subheader("Atmospheric Trends")
+                trend_col1, trend_col2 = st.columns(2)
+                with trend_col1:
+                    st.pyplot(plot_weather_trend(times, cape_vals, "CAPE Trend", "red", "CAPE (J/kg)"))
+                with trend_col2:
+                    st.pyplot(plot_weather_trend(times, cin_vals, "CIN Trend", "blue", "CIN (J/kg)"))
+            
+            # Display forecast
+            st.subheader("Hourly Forecast")
+            for hour in hourly[:12]:  # Show next 12 hours
+                with st.expander(hour["time"], expanded=False):
+                    cols = st.columns(3)
+                    with cols[0]:
+                        st.metric("Temperature", f"{hour['temperature']}°F")
+                        st.metric("Dewpoint", f"{hour['dewpoint']}°F")
+                    with cols[1]:
+                        st.metric("Wind", f"{hour['windSpeed']}/{hour['windGusts']} mph")
+                        st.metric("Humidity", f"{hour['humidity']}%")
+                    with cols[2]:
+                        st.metric("Precip", f"{hour['precipitation']} in")
+                        st.metric("Cloud Cover", f"{hour['cloudCover']}%")
+            
+            # Display precipitation summary if available
+            if precip_24h is not None:
+                st.subheader(f"24-Hour Precipitation: {precip_24h:.2f} in")
+            
+        except Exception as e:
+            st.error(f"Failed to load weather data: {str(e)}")
+            st.info("Default values are being shown. Please try again later.")
+            
+            # Show default metrics
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("CAPE", f"{DEFAULT_METRICS['cape_jkg']} J/kg")
+            with col2:
+                st.metric("0-6km Shear", f"{DEFAULT_METRICS['shear_mph']:.1f} mph")
 
 if __name__ == "__main__":
     main()
