@@ -1,229 +1,115 @@
 import streamlit as st
 import requests
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
-from geopy.distance import geodesic
-from io import StringIO
 import matplotlib.pyplot as plt
 
 st.set_page_config("Severe Weather Dashboard", layout="centered")
-st.title("Severe Weather Dashboard")
+st.title("Severe Weather Dashboard (Powered by Tomorrow.io)")
 
-# Browser geolocation injection
-st.markdown("""
-<script>
-navigator.geolocation.getCurrentPosition(
-  (loc) => {
-    const coords = `${loc.coords.latitude},${loc.coords.longitude}`;
-    window.parent.postMessage({type: 'streamlit:setComponentValue', value: coords}, "*");
-  },
-  (err) => {
-    window.parent.postMessage({type: 'streamlit:setComponentValue', value: 'geo_failed'}, "*");
-  }
-);
-</script>
-""", unsafe_allow_html=True)
+API_KEY = "YOUR_TOMORROW_IO_API_KEY"
 
-location_coords = st.query_params.get("geolocation", [None])[0]
+@st.cache_data(ttl=900)
+def get_tomorrowio_data(lat, lon):
+    url = (
+        f"https://api.tomorrow.io/v4/weather/forecast"
+        f"?location={lat},{lon}"
+        f"&timesteps=1h&units=imperial"
+        f"&fields=temperature,dewPoint,humidity,windSpeed,windGust,"
+        f"precipitationIntensity,cloudCover,cap,cin"
+        f"&apikey={API_KEY}"
+    )
+    r = requests.get(url)
+    return r.json() if r.status_code == 200 else None
 
-if location_coords and location_coords != "geo_failed":
-    lat, lon = map(float, location_coords.split(","))
-    label = "Detected Location (via Browser)"
-else:
-    user_input = st.text_input("Enter ZIP Code or City, State", "76247")
-    if user_input.isnumeric():
-        r = requests.get(f"https://api.zippopotam.us/us/{user_input}")
-        data = r.json()
-        place = data["places"][0]
-        lat, lon = float(place["latitude"]), float(place["longitude"])
-        label = f"{place['place name']}, {place['state abbreviation']}"
-    else:
-        url = f"https://geocoding-api.open-meteo.com/v1/search?name={user_input}&country=US"
-        r = requests.get(url).json()
-        if "results" in r and r["results"]:
-            res = r["results"][0]
-            lat, lon, label = res["latitude"], res["longitude"], res["name"]
-        else:
-            lat, lon, label = 32.9, -97.3, "DFW Metroplex"
-            st.warning("Could not find location. Defaulting to DFW.")
+@st.cache_data
+def geocode_location(query):
+    geo = requests.get(f"https://geocoding-api.open-meteo.com/v1/search?name={query}&country=US").json()
+    if "results" in geo:
+        res = geo["results"][0]
+        return res["latitude"], res["longitude"], res["name"]
+    return 32.9, -97.3, "DFW"
 
+user_input = st.text_input("Enter ZIP Code or City, State", "76247")
+lat, lon, label = geocode_location(user_input)
 st.markdown(f"**Location:** {label}")
 st.map({"lat": [lat], "lon": [lon]})
 
-stations = {
-    "KOUN": {"lat": 35.23, "lon": -97.46},
-    "KFWD": {"lat": 32.83, "lon": -97.30},
-    "KAMA": {"lat": 35.22, "lon": -101.72},
-    "KLZK": {"lat": 34.83, "lon": -92.26},
-    "KSHV": {"lat": 32.45, "lon": -93.83}
-}
+data = get_tomorrowio_data(lat, lon)
+if not data:
+    st.error("Failed to fetch weather data.")
+    st.stop()
 
-def find_nearest_station(lat, lon):
-    return min(stations, key=lambda s: geodesic((lat, lon), (stations[s]['lat'], stations[s]['lon'])).miles)
+hours = data['timelines']['hourly']
+df = pd.DataFrame([{
+    "time": datetime.fromisoformat(h["time"]).strftime("%a %I:%M %p"),
+    "temp": h["values"]["temperature"],
+    "dew": h["values"]["dewPoint"],
+    "humidity": h["values"]["humidity"],
+    "wind": h["values"]["windSpeed"],
+    "gusts": h["values"]["windGust"],
+    "precip": h["values"]["precipitationIntensity"],
+    "clouds": h["values"]["cloudCover"],
+    "cape": h["values"].get("cap", 0),
+    "cin": h["values"].get("cin", 0)
+} for h in hours[:12]])
 
-def get_rap_cape(station):
-    now = datetime.utcnow()
-    url = (
-        "https://mesonet.agron.iastate.edu/cgi-bin/request/raob.py?"
-        f"station={station}&data=cape&year1={now.year}&month1={now.month}&day1={now.day}"
-        f"&year2={now.year}&month2={now.month}&day2={now.day}&format=comma&latlon=no&direct=yes"
-    )
-    r = requests.get(url)
-    if r.status_code != 200:
-        return None
-    df = pd.read_csv(StringIO(r.text))
-    return df["cape"].dropna().iloc[-1] if "cape" in df.columns and not df["cape"].dropna().empty else None
-
-def get_forecast(lat, lon):
-    url = (
-        f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
-        f"&hourly=temperature_2m,windspeed_10m,windgusts_10m,precipitation,precipitation_probability,"
-        f"cloudcover,dewpoint_2m,relative_humidity_2m,cape,convective_inhibition"
-        f"&daily=precipitation_sum,sunrise,sunset&past_days=1&forecast_days=1"
-        f"&temperature_unit=fahrenheit&windspeed_unit=mph&precipitation_unit=inch&timezone=auto"
-    )
-    res = requests.get(url).json()
-    if "hourly" not in res or "daily" not in res:
-        return None, None, None, None, None, None, None, None, None
-    hourly = res["hourly"]
-    timezone = res.get("timezone", "America/Chicago")
-    data = []
-    for i, time in enumerate(hourly["time"]):
-        dt = datetime.fromisoformat(time)
-        if dt > datetime.now() and len(data) < 12:
-            data.append({
-                "time": dt.strftime("%a %I:%M %p"),
-                "temperature": hourly["temperature_2m"][i],
-                "windSpeed": hourly["windspeed_10m"][i],
-                "windGusts": hourly["windgusts_10m"][i],
-                "precipitation": hourly["precipitation"][i],
-                "precipProbability": hourly["precipitation_probability"][i],
-                "cloudCover": hourly["cloudcover"][i],
-                "dewpoint": hourly["dewpoint_2m"][i],
-                "humidity": hourly["relative_humidity_2m"][i],
-                "cape": hourly["cape"][i],
-                "cin": hourly["convective_inhibition"][i]
-            })
-    times = [datetime.fromisoformat(t).strftime("%I %p") for t in hourly["time"][:12]]
-    cape_vals = hourly["cape"][:12]
-    cin_vals = hourly["convective_inhibition"][:12]
-    daily = res["daily"]
-    precip_24h = daily["precipitation_sum"][0]
-    sunrise = datetime.fromisoformat(daily["sunrise"][0])
-    sunset = datetime.fromisoformat(daily["sunset"][0])
-    return data, precip_24h, times, cape_vals, cin_vals, hourly["time"], sunrise, sunset, timezone
-
-def calculate_risk(cape, forecast):
+def calculate_risk(row):
     score = 0
-    if cape >= 3000: score += 30
-    elif cape >= 2000: score += 20
-    elif cape >= 1000: score += 10
-    if forecast["windGusts"] >= 60: score += 25
-    elif forecast["windGusts"] >= 45: score += 15
-    if forecast["precipitation"] >= 1: score += 15
-    elif forecast["precipitation"] >= 0.3: score += 10
-    if forecast["humidity"] >= 80 and forecast["dewpoint"] >= 65: score += 10
-    elif forecast["humidity"] >= 60 and forecast["dewpoint"] >= 60: score += 5
-    cin = forecast["cin"]
-    if cin <= -100:
+    if row["cape"] >= 3000: score += 30
+    elif row["cape"] >= 2000: score += 20
+    elif row["cape"] >= 1000: score += 10
+    if row["gusts"] >= 60: score += 25
+    elif row["gusts"] >= 45: score += 15
+    if row["precip"] >= 1: score += 15
+    elif row["precip"] >= 0.3: score += 10
+    if row["humidity"] >= 80 and row["dew"] >= 65: score += 10
+    elif row["humidity"] >= 60 and row["dew"] >= 60: score += 5
+    if row["cin"] <= -100:
         score -= 20
-    elif -100 < cin <= -50:
+    elif -100 < row["cin"] <= -50:
         score -= 10
-    elif cin >= 0:
+    elif row["cin"] >= 0:
         score += 10
     return max(min(score, 100), 0)
 
-def set_background_theme(now, sunrise, sunset):
-    if now < sunrise - timedelta(minutes=90) or now > sunset + timedelta(minutes=90):
-        bg = "#000000"
-    elif sunrise - timedelta(minutes=90) <= now < sunrise - timedelta(minutes=30):
-        bg = "#1a1a2e"
-    elif sunrise - timedelta(minutes=30) <= now < sunrise:
-        bg = "#2c3e50"
-    elif sunrise <= now < sunrise + timedelta(minutes=30):
-        bg = "#ff914d"
-    elif sunset - timedelta(minutes=30) <= now < sunset:
-        bg = "#ff914d"
-    elif sunset <= now < sunset + timedelta(minutes=30):
-        bg = "#2c3e50"
-    else:
-        bg = "#fff8cc"
-    st.markdown(f"<style>.stApp {{ background-color: {bg}; }}</style>", unsafe_allow_html=True)
+df["risk"] = df.apply(calculate_risk, axis=1)
 
-station = find_nearest_station(lat, lon)
-cape = get_rap_cape(station)
-result = get_forecast(lat, lon)
-if result[0] is None:
-    st.error("Failed to retrieve forecast data.")
-    st.stop()
+# 🌅 Local time from first forecast entry
+timezone = "America/Chicago"  # fallback timezone
+local_time = datetime.fromisoformat(hours[0]["time"]).replace(tzinfo=ZoneInfo(timezone))
+st.caption(f"**Local Forecast Time:** {local_time.strftime('%A %I:%M %p')} ({timezone})")
 
-forecast_data, precip_24h, times, cape_vals, cin_vals, full_times, sunrise, sunset, timezone = result
-now = datetime.fromisoformat(full_times[0]).replace(tzinfo=ZoneInfo(timezone))
-sunrise = sunrise.replace(tzinfo=ZoneInfo(timezone))
-sunset = sunset.replace(tzinfo=ZoneInfo(timezone))
-set_background_theme(now, sunrise, sunset)
-
-st.caption(f"**Local Time (Forecast Location):** {now.strftime('%A %I:%M %p')} ({timezone})")
-st.caption(f"**Sunrise:** {sunrise.strftime('%I:%M %p')} | **Sunset:** {sunset.strftime('%I:%M %p')}")
-
-cape_source = f"RAP Sounding (Station: {station})" if cape else "Open-Meteo Forecast"
-cape_time = datetime.utcnow().strftime("%a %I:%M %p UTC") if cape else now.strftime("%a %I:%M %p")
-cape = cape or forecast_data[0]["cape"]
-st.subheader(f"CAPE: {cape:.0f} J/kg")
-st.caption(f"Source: {cape_source}")
-st.caption(f"Updated: {cape_time}")
-
-# Real-time shear map
-st.subheader("Real-Time HRRR 0–6 km Bulk Shear Map")
-shear_img_url = "https://www.pivotalweather.com/maps/models/hrrr/20240330/1800/shear-bulk06h/hrrr_CONUS_202403301800_bulk06h_f000.png"
-st.image(shear_img_url, caption="Bulk Shear (HRRR) from Pivotal Weather", use_container_width=True)
-
-# CAPE Trend
-st.subheader("CAPE Trend (Next 12 Hours)")
+# 📊 Trend Charts
+st.subheader("CAPE & CIN Trend")
 fig, ax = plt.subplots(figsize=(10, 4))
-ax.plot(times, cape_vals, marker="o", color="goldenrod")
-ax.set_ylabel("CAPE (J/kg)")
-ax.set_xlabel("Time")
-ax.grid(True)
-plt.xticks(rotation=45)
-plt.tight_layout()
+ax.plot(df["time"], df["cape"], label="CAPE", color="orange", marker="o")
+ax.set_ylabel("CAPE (J/kg)", color="orange")
+ax.tick_params(axis='y', labelcolor="orange")
+ax2 = ax.twinx()
+ax2.plot(df["time"], df["cin"], label="CIN", color="purple", linestyle="--", marker="o")
+ax2.set_ylabel("CIN (J/kg)", color="purple")
+ax2.tick_params(axis='y', labelcolor="purple")
+fig.autofmt_xdate()
 st.pyplot(fig)
 
-# CIN Trend
-st.subheader("CIN Trend (Next 12 Hours)")
-fig2, ax2 = plt.subplots(figsize=(10, 4))
-ax2.plot(times, cin_vals, marker="o", color="purple")
-ax2.set_ylabel("CIN (J/kg)")
-ax2.set_xlabel("Time")
-ax2.grid(True)
-plt.xticks(rotation=45)
-plt.tight_layout()
-st.pyplot(fig2)
-
-# Forecast hour blocks
-st.subheader(f"24-Hour Precipitation: {precip_24h:.2f} in")
-for hour in forecast_data:
-    with st.container():
-        st.markdown(f"### {hour['time']}")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Temp", f"{hour['temperature']} °F")
-            st.metric("Dewpoint", f"{hour['dewpoint']} °F")
-            st.metric("CIN", f"{hour['cin']:.0f} J/kg")
-        with col2:
-            st.metric("Wind / Gusts", f"{hour['windSpeed']} / {hour['windGusts']} mph")
-            st.metric("Cloud / Humidity", f"{hour['cloudCover']}% / {hour['humidity']}%")
-        with col3:
-            st.metric("Precip", f"{hour['precipitation']} in ({hour['precipProbability']}%)")
-            risk = calculate_risk(cape, hour)
-            st.metric("Risk Score", f"{risk}/100")
-            st.progress(risk / 100)
-        cin_val = hour["cin"]
-        if cin_val <= -100:
-            st.error("Strong Cap Present: Storms suppressed unless lifted.")
-        elif -100 < cin_val <= -50:
-            st.warning("Moderate Cap: May break with heating or lift.")
-        elif cin_val > -50:
-            st.success("Weak or No Cap: Storms more likely.")
-        st.markdown("---")
+# 📊 Forecast Display
+st.subheader("Severe Weather Risk - Next 12 Hours")
+for _, row in df.iterrows():
+    st.markdown(f"### {row['time']}")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Temp", f"{row['temp']} °F")
+        st.metric("Dew Point", f"{row['dew']} °F")
+        st.metric("CIN", f"{row['cin']:.0f} J/kg")
+    with col2:
+        st.metric("Wind", f"{row['wind']} mph")
+        st.metric("Gusts", f"{row['gusts']} mph")
+        st.metric("Humidity", f"{row['humidity']}%")
+    with col3:
+        st.metric("Precip", f"{row['precip']:.2f} in/hr")
+        st.metric("CAPE", f"{row['cape']:.0f} J/kg")
+        st.metric("Risk Score", f"{row['risk']}/100")
+        st.progress(row["risk"] / 100)
+    st.markdown("---")
