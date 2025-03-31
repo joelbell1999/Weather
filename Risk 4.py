@@ -50,7 +50,7 @@ with st.container():
 @st.cache_data(ttl=300)
 def get_surface_boundaries():
     try:
-        return requests.get("https://www.spc.noaa.gov/products/fronts/fronts_latest.geojson", timeout=5).json()
+        return requests.get("https://mesonet.agron.iastate.edu/geojson/surface_fronts.geojson", timeout=5).json()
     except:
         return None
 
@@ -78,7 +78,7 @@ if st_data and "last_center" in st_data:
 
 # 🧭 SPC Outlook Overlay
 try:
-    spc_url = f"https://www.spc.noaa.gov/products/outlook/day1otlk_cat.lyr.json"
+    spc_url = "https://www.spc.noaa.gov/products/outlook/day1otlk_cat.lyr.geojson"
     spc_geojson = requests.get(spc_url, timeout=10).json()
     found = False
     for feature in spc_geojson.get("features", []):
