@@ -82,8 +82,7 @@ from shapely.geometry import shape
 
 from datetime import date, timedelta
 try:
-
-today = date.today().strftime("%Y%m%d")
+    today = date.today().strftime("%Y%m%d")
 from pathlib import Path
 
 # Try today's file, fallback to yesterday if 404
