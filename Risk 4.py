@@ -362,7 +362,7 @@ else:
     trigger_emoji, trigger_msg, trigger_color = "✅", "No obvious trigger yet", "#2ecc71"
 
 st.markdown(f"**Season Profile Active:** `{season.title()}`")
-st.markdown(f"**Trigger Mechanism Signal:** {trigger_msg}")** {trigger_msg}")
+st.markdown(f"**Trigger Mechanism Signal:** {trigger_msg}")
 st.markdown(f"{trigger_emoji} <div style='height: 20px; width: {trigger_score * 25}%; background-color: {trigger_color}; border-radius: 4px; transition: width 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
 
 # ✅ Storm Readiness Score (CAPE + CIN)
