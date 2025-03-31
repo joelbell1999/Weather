@@ -124,6 +124,23 @@ for _, row in df.iterrows():
         st.metric("CAPE", f"{row['cape']:.0f} J/kg")
         st.metric("Shear (ΔSpeed)", f"{row['shear']:.1f} mph")
         st.metric("SRH", f"{row['srh']:.0f} m²/s²")
+
         st.metric("Risk Score", f"{row['risk']}/100")
         st.progress(row["risk"] / 100)
+
+        # CAPE bar
+        cape_val = row["cape"]
+        cape_color = "#ff4d4d" if cape_val >= 3000 else "#ffaa00" if cape_val >= 1500 else "#2ecc71"
+        st.markdown(f"<div style='height: 8px; width: {min(cape_val/40, 100)}%; background-color: {cape_color};'></div>", unsafe_allow_html=True)
+
+        # Shear bar
+        shear_val = row["shear"]
+        shear_color = "#ff4d4d" if shear_val >= 40 else "#ffaa00" if shear_val >= 30 else "#2ecc71"
+        st.markdown(f"<div style='height: 8px; width: {min(shear_val, 100)}%; background-color: {shear_color};'></div>", unsafe_allow_html=True)
+
+        # SRH bar
+        srh_val = row["srh"]
+        srh_color = "#ff4d4d" if srh_val >= 150 else "#ffaa00" if srh_val >= 100 else "#2ecc71"
+        st.markdown(f"<div style='height: 8px; width: {min(srh_val/2, 100)}%; background-color: {srh_color};'></div>", unsafe_allow_html=True)
+
     st.markdown("---")
