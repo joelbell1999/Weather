@@ -60,7 +60,7 @@ if time() - st.session_state.radar_last_refresh > 60:
 
 # 🌧 MRMS Radar Image (via NOAA)
 radar_url = f"https://radar.weather.gov/ridge/standard/KFWS_loop.gif?{int(time())}"
-st.image(radar_url, caption="NWS Radar (KFWS)", use_column_width=True)", use_column_width=True)
+st.image(radar_url, caption="NWS Radar (KFWS)", use_column_width=True)
 
 # 🔥 Current Risk Bar
 current_risk = df.iloc[0]['risk']
