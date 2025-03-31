@@ -55,7 +55,7 @@ def get_surface_boundaries():
         return None
 
 boundary_data = get_surface_boundaries()
-if boundary_data and "features" in boundary_data:
+if boundary_data and boundary_data.get("features"):
     for feature in boundary_data.get("features", []):
         coords = feature["geometry"]["coordinates"]
         for line in coords:
@@ -101,8 +101,14 @@ if not shapefile_available(shapefile_url):
     shapefile_url = f"https://www.spc.noaa.gov/products/outlook/archive/{yesterday[:4]}/day1otlk_cat_{yesterday}_1300.zip"
     used_yesterday = True
 
+import zipfile
+from io import BytesIO
+
 try:
-    gdf = gpd.read_file(shapefile_url)
+    zip_data = requests.get(shapefile_url, timeout=10).content
+    with zipfile.ZipFile(BytesIO(zip_data)) as zf:
+        shp_path = [name for name in zf.namelist() if name.endswith('.shp')][0]
+        gdf = gpd.read_file(zf.open(shp_path))
     for _, row in gdf.iterrows():
         color_map = {
             "MRGL": "green",
@@ -143,6 +149,8 @@ if boundary_data and "features" in boundary_data:
         f_type = props.get("type", "Boundary")
         f_label = props.get("label", "")
         st.markdown(f"- {f_type}: {f_label}")
+elif boundary_data:
+    st.info("No SPC boundaries are currently active.")
 else:
     st.info("SPC surface boundary data currently unavailable.")
 
