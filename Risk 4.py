@@ -116,6 +116,8 @@ def calculate_risk(row):
 
 df["risk"] = df.apply(calculate_risk, axis=1)
 
+row = df.iloc[0]
+
 # ✅ Storm Readiness Score (CAPE + CIN)
 readiness = row["cape"] - abs(row["cin"])
 readiness_color = "#ff4d4d" if readiness < 500 else "#ffaa00" if readiness < 1000 else "#2ecc71"
