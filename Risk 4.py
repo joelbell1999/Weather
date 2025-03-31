@@ -83,7 +83,6 @@ from shapely.geometry import shape
 from datetime import date, timedelta
 try:
     today = date.today().strftime("%Y%m%d")
-from pathlib import Path
 
 # Try today's file, fallback to yesterday if 404
 shapefile_url = f"https://www.spc.noaa.gov/products/outlook/archive/{today[:4]}/day1otlk_cat_{today}_1300.zip"
