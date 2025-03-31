@@ -128,3 +128,62 @@ ax_risk.set_xticks(range(len(df["time"])))
 ax_risk.set_xticklabels(df["time"], rotation=45, ha="right")
 ax_risk.grid(True)
 st.pyplot(fig_risk)
+
+# 🌅 Local time from first forecast entry
+timezone = "America/Chicago"
+local_time = datetime.fromisoformat(hours[0]["time"]).replace(tzinfo=ZoneInfo(timezone))
+st.caption(f"**Local Forecast Time:** {local_time.strftime('%A %I:%M %p')} ({timezone})")
+
+# 📊 CAPE & CIN Trend
+st.subheader("CAPE & CIN Trend")
+fig, ax = plt.subplots(figsize=(10, 4))
+ax.plot(df["time"], df["cape"], label="CAPE", color="orange", marker="o")
+ax.set_ylabel("CAPE (J/kg)", color="orange")
+ax.tick_params(axis='y', labelcolor="orange")
+ax2 = ax.twinx()
+ax2.plot(df["time"], df["cin"], label="CIN", color="purple", linestyle="--", marker="o")
+ax2.set_ylabel("CIN (J/kg)", color="purple")
+ax2.tick_params(axis='y', labelcolor="purple")
+fig.autofmt_xdate()
+st.pyplot(fig)
+
+# 📊 Hourly Forecast Breakdown
+st.subheader("Severe Weather Risk - Next 12 Hours")
+for _, row in df.iterrows():
+    st.markdown(f"### {row['time']}")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Temp", f"{row['temp']} °F")
+        st.metric("Dew Point", f"{row['dew']} °F")
+        st.metric("CIN", f"{row['cin']:.0f} J/kg")
+    with col2:
+        st.metric("Wind", f"{row['wind']} mph")
+        st.metric("Gusts", f"{row['gusts']} mph")
+        st.metric("Humidity", f"{row['humidity']}%")
+    with col3:
+        st.metric("Precip", f"{row['precip']:.2f} in/hr")
+        st.metric("CAPE", f"{row['cape']:.0f} J/kg")
+        st.metric("Shear (ΔSpeed)", f"{row['shear']:.1f} mph")
+        st.metric("SRH", f"{row['srh']:.0f} m²/s²")
+        st.metric("Risk Score", f"{row['risk']}/100")
+        st.progress(row["risk"] / 100)
+
+        # CAPE Bar
+        cape_val = row["cape"]
+        cape_color = "#ff4d4d" if cape_val >= 3000 else "#ffaa00" if cape_val >= 1500 else "#2ecc71"
+        cape_width = max(min(cape_val / 40, 100), 5)
+        st.markdown(f"<div style='margin-top: 4px; height: 12px; width: {cape_width}%; background-color: {cape_color};'></div>", unsafe_allow_html=True)
+
+        # Shear Bar
+        shear_val = row["shear"]
+        shear_color = "#ff4d4d" if shear_val >= 40 else "#ffaa00" if shear_val >= 30 else "#2ecc71"
+        shear_width = max(min(shear_val, 100), 5)
+        st.markdown(f"<div style='margin-top: 4px; height: 12px; width: {shear_width}%; background-color: {shear_color};'></div>", unsafe_allow_html=True)
+
+        # SRH Bar
+        srh_val = row["srh"]
+        srh_color = "#ff4d4d" if srh_val >= 150 else "#ffaa00" if srh_val >= 100 else "#2ecc71"
+        srh_width = max(min(srh_val / 2, 100), 5)
+        st.markdown(f"<div style='margin-top: 4px; height: 12px; width: {srh_width}%; background-color: {srh_color};'></div>", unsafe_allow_html=True)
+
+    st.markdown("---")
