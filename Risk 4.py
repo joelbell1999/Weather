@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 st.set_page_config("Severe Weather Dashboard", layout="centered")
 st.title("Severe Weather Dashboard (Powered by Tomorrow.io)")
 
-API_KEY = "YOUR_TOMORROW_IO_API_KEY"
+API_KEY = "4q4STtGVpjZXJ2VredMSnQxdo5q5orOM"
 
 @st.cache_data(ttl=900)
 def get_tomorrowio_data(lat, lon):
