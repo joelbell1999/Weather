@@ -280,7 +280,8 @@ with cols[4]:
 # 📡 SPC Mesoscale Discussion Trigger Check
 spc_mcd_url = "https://mesoanalysis.spc.noaa.gov/json/srh/srh_0_1km.json"
 try:
-    spc_response = requests.get(spc_mcd_url, timeout=5).json()
+    headers = {"User-Agent": "Mozilla/5.0"}
+    spc_response = requests.get(spc_mcd_url, headers=headers, timeout=5).json()
     trigger_active = any(feature.get("properties", {}).get("value", 0) >= 100 for feature in spc_response.get("features", []))
     if trigger_active:
         st.markdown("### 🛰️ SPC Mesoanalysis Suggests Trigger Active")
