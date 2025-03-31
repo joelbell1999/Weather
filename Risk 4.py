@@ -81,17 +81,27 @@ import geopandas as gpd
 from shapely.geometry import shape
 
 from datetime import date, timedelta
-today = date.today().strftime("%Y%m%d")
+import urllib.request
 
-# Try today's file, fallback to yesterday if 404
+today = date.today().strftime("%Y%m%d")
+yesterday = (date.today() - timedelta(days=1)).strftime("%Y%m%d")
+
+def shapefile_available(url):
+    try:
+        req = urllib.request.Request(url, method="HEAD")
+        urllib.request.urlopen(req)
+        return True
+    except:
+        return False
+
 shapefile_url = f"https://www.spc.noaa.gov/products/outlook/archive/{today[:4]}/day1otlk_cat_{today}_1300.zip"
 used_yesterday = False
-try:
-    gdf = gpd.read_file(shapefile_url)
-except Exception as e:
-    yesterday = (date.today() - timedelta(days=1)).strftime("%Y%m%d")
+
+if not shapefile_available(shapefile_url):
     shapefile_url = f"https://www.spc.noaa.gov/products/outlook/archive/{yesterday[:4]}/day1otlk_cat_{yesterday}_1300.zip"
     used_yesterday = True
+
+try:
     gdf = gpd.read_file(shapefile_url)
     for _, row in gdf.iterrows():
         color_map = {
