@@ -199,29 +199,70 @@ df = pd.DataFrame([{
 
 def calculate_risk(row):
     score = 0
-    if row["cape"] >= 3000: score += 30
-    elif row["cape"] >= 2000: score += 20
-    elif row["cape"] >= 1000: score += 10
-    if row["gusts"] >= 60: score += 25
-    elif row["gusts"] >= 45: score += 15
-    if row["precip"] >= 1: score += 15
-    elif row["precip"] >= 0.3: score += 10
-    if row["humidity"] >= 80 and row["dew"] >= 65: score += 10
-    elif row["humidity"] >= 60 and row["dew"] >= 60: score += 5
+    month = datetime.now().month
+
+    # Determine season
+    if month in [3, 4, 5]:  # Spring
+        season = 'spring'
+    elif month in [6, 7, 8]:  # Summer
+        season = 'summer'
+    else:  # Fall
+        season = 'fall'
+
+    # CAPE
+    if season == 'spring':
+        if row["cape"] >= 3000: score += 25
+        elif row["cape"] >= 2000: score += 20
+        elif row["cape"] >= 1000: score += 10
+    elif season == 'summer':
+        if row["cape"] >= 4000: score += 30
+        elif row["cape"] >= 3000: score += 20
+        elif row["cape"] >= 2000: score += 10
+    else:  # fall
+        if row["cape"] >= 1500: score += 20
+        elif row["cape"] >= 1000: score += 10
+        elif row["cape"] >= 500: score += 5
+
+    # Wind Gusts
+    if row["gusts"] >= 60: score += 20
+    elif row["gusts"] >= 45: score += 10
+
+    # Precipitation
+    if row["precip"] >= 2: score += 10
+    elif row["precip"] >= 1: score += 5
+
+    # Dew point & Humidity
+    if row["dew"] >= 70: score += 10
+    elif row["dew"] >= 65 and row["humidity"] >= 70: score += 5
+
+    # CIN (inhibitor)
     if row["cin"] <= -100:
         score -= 20
     elif -100 < row["cin"] <= -50:
         score -= 10
     elif row["cin"] >= 0:
-        score += 10
-    if row["shear"] >= 40:
-        score += 10
-    elif row["shear"] >= 30:
         score += 5
-    if row["srh"] >= 150:
-        score += 10
-    elif row["srh"] >= 100:
-        score += 5
+
+    # Shear (0-6 km bulk shear)
+    if season == 'spring':
+        if row["shear"] >= 50: score += 15
+        elif row["shear"] >= 40: score += 10
+        elif row["shear"] >= 30: score += 5
+    elif season == 'summer':
+        if row["shear"] >= 30: score += 10
+        elif row["shear"] >= 20: score += 5
+    else:  # fall
+        if row["shear"] >= 50: score += 15
+        elif row["shear"] >= 40: score += 10
+        elif row["shear"] >= 30: score += 5
+
+    # SRH
+    if season in ['spring', 'fall']:
+        if row["srh"] >= 250: score += 10
+        elif row["srh"] >= 150: score += 5
+    elif season == 'summer':
+        if row["srh"] >= 150: score += 5
+
     return max(min(score, 100), 0)
 
 df["risk"] = df.apply(calculate_risk, axis=1)
@@ -291,14 +332,27 @@ except Exception as e:
 
 # 🧭 Trigger Potential Estimate (Fallback)
 trigger_score = 0
-if df["cin"].iloc[0] < -100 and df["cin"].iloc[1] > df["cin"].iloc[0]:
-    trigger_score += 1
-if df["dew"].iloc[1] - df["dew"].iloc[0] > 2:
-    trigger_score += 1
-if df["shear"].iloc[1] > df["shear"].iloc[0] and df["shear"].iloc[1] > 30:
-    trigger_score += 1
-if df["precip"].iloc[0] >= 0.05:
-    trigger_score += 1
+month = datetime.now().month
+if month in [3, 4, 5]: season = 'spring'
+elif month in [6, 7, 8]: season = 'summer'
+else: season = 'fall'
+
+# Season-specific logic
+if season == 'spring':
+    if df["cin"].iloc[0] < -100 and df["cin"].iloc[1] > df["cin"].iloc[0]: trigger_score += 1
+    if df["dew"].iloc[1] - df["dew"].iloc[0] > 2: trigger_score += 1
+    if df["shear"].iloc[1] > df["shear"].iloc[0] and df["shear"].iloc[1] > 30: trigger_score += 1
+    if df["precip"].iloc[0] >= 0.05: trigger_score += 1
+elif season == 'summer':
+    if df["dew"].iloc[1] > 70 and df["cin"].iloc[0] > -50: trigger_score += 1
+    if df["cape"].iloc[0] > 3500: trigger_score += 1
+    if df["precip"].iloc[0] >= 0.1: trigger_score += 1
+    if df["shear"].iloc[1] > 20: trigger_score += 1
+else:  # fall
+    if df["shear"].iloc[0] > 40: trigger_score += 1
+    if df["dew"].iloc[0] >= 60: trigger_score += 1
+    if df["precip"].iloc[0] >= 0.1: trigger_score += 1
+    if df["srh"].iloc[0] > 150: trigger_score += 1
 
 if trigger_score >= 3:
     trigger_emoji, trigger_msg, trigger_color = "⛔", "Active trigger likely", "#ff4d4d"
@@ -307,16 +361,26 @@ elif trigger_score == 2:
 else:
     trigger_emoji, trigger_msg, trigger_color = "✅", "No obvious trigger yet", "#2ecc71"
 
-st.markdown(f"**Trigger Mechanism Signal:** {trigger_msg}")
+st.markdown(f"**Season Profile Active:** `{season.title()}`")
+st.markdown(f"**Trigger Mechanism Signal:** {trigger_msg}")** {trigger_msg}")
 st.markdown(f"{trigger_emoji} <div style='height: 20px; width: {trigger_score * 25}%; background-color: {trigger_color}; border-radius: 4px; transition: width 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
 
 # ✅ Storm Readiness Score (CAPE + CIN)
-readiness = row["cape"] - abs(row["cin"])
-readiness_color = "#2ecc71" if readiness < 500 else "#ffaa00" if readiness < 1000 else "#ff4d4d"
-readiness_emoji = "✅" if readiness < 500 else "⚠️" if readiness < 1000 else "⛔"
+if season == 'spring':
+    readiness = row["cape"] - abs(row["cin"])
+    thresholds = [500, 1000]
+elif season == 'summer':
+    readiness = row["cape"] - abs(row["cin"])
+    thresholds = [1000, 1500]
+else:
+    readiness = row["cape"] - abs(row["cin"])
+    thresholds = [250, 750]
+
+readiness_color = "#2ecc71" if readiness < thresholds[0] else "#ffaa00" if readiness < thresholds[1] else "#ff4d4d"
+readiness_emoji = "✅" if readiness < thresholds[0] else "⚠️" if readiness < thresholds[1] else "⛔"
 readiness_width = max(min(readiness / 40, 100), 5)
 st.markdown(f"**Storm Readiness:** {readiness:.0f} (CAPE - |CIN|)")
-st.markdown(f"{readiness_emoji} <div style='height: 20px; width: {readiness_width}%; background-color: {readiness_color}; border-radius: 4px; transition: width 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
+st.markdown(f"{readiness_emoji} <div style='height: 20px; width: {readiness_width}%; background-color: {readiness_color}; border-radius: 4px; transition: width 0.8s ease-in-out;'></div>", unsafe_allow_html=True); background-color: {readiness_color}; border-radius: 4px; transition: width 0.8s ease-in-out;'></div>", unsafe_allow_html=True)
 
 # 🔥 Current Risk Bar
 current_risk = df.iloc[0]["risk"]
@@ -337,6 +401,7 @@ risk_chart.add_trace(go.Scatter(
     hovertemplate="Time: %{x}<br>Risk: %{y} <extra></extra>"
 ))
 risk_chart.update_layout(
+    title=f"{season.title()} Risk Profile",
     yaxis=dict(title="Risk Score", range=[0, 100]),
     xaxis=dict(title="Time", tickangle=-45),
     height=300,
@@ -367,6 +432,7 @@ cape_cin_chart.add_trace(go.Scatter(
     hovertemplate="Time: %{x}<br>CIN: %{y} J/kg<extra></extra>"
 ))
 cape_cin_chart.update_layout(
+    title=f"{season.title()} Instability Profile",
     yaxis=dict(title="J/kg"),
     xaxis=dict(title="Time", tickangle=-45),
     height=300,
