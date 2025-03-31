@@ -7,3 +7,4 @@ matplotlib
 beautifulsoup4
 python-dateutil
 plotly
+folium
