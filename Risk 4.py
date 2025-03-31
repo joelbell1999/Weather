@@ -17,7 +17,7 @@ def get_tomorrowio_data(lat, lon):
         f"?location={lat},{lon}"
         f"&timesteps=1h&units=imperial"
         f"&fields=temperature,dewPoint,humidity,windSpeed,windGust,"
-        f"precipitationIntensity,cloudCover,cap,cin"
+        f"precipitationIntensity,cloudCover,cap,cin,windSpeed1000hpa,windSpeed500hpa,stormRelativeHelicity"
         f"&apikey={API_KEY}"
     )
     r = requests.get(url)
@@ -54,7 +54,9 @@ df = pd.DataFrame([{
     "precip": h["values"].get("precipitationIntensity", 0),
     "clouds": h["values"].get("cloudCover"),
     "cape": h["values"].get("cap", 0),
-    "cin": h["values"].get("cin", 0)
+    "cin": h["values"].get("cin", 0),
+    "shear": abs(h["values"].get("windSpeed500hpa", 0) - h["values"].get("windSpeed1000hpa", 0)),
+    "srh": h["values"].get("stormRelativeHelicity", 0)
 } for h in hours[:12]])
 
 def calculate_risk(row):
@@ -74,12 +76,20 @@ def calculate_risk(row):
         score -= 10
     elif row["cin"] >= 0:
         score += 10
+    if row["shear"] >= 40:
+        score += 10
+    elif row["shear"] >= 30:
+        score += 5
+    if row["srh"] >= 150:
+        score += 10
+    elif row["srh"] >= 100:
+        score += 5
     return max(min(score, 100), 0)
 
 df["risk"] = df.apply(calculate_risk, axis=1)
 
 # 🌅 Local time from first forecast entry
-timezone = "America/Chicago"  # fallback timezone
+timezone = "America/Chicago"
 local_time = datetime.fromisoformat(hours[0]["time"]).replace(tzinfo=ZoneInfo(timezone))
 st.caption(f"**Local Forecast Time:** {local_time.strftime('%A %I:%M %p')} ({timezone})")
 
@@ -112,6 +122,8 @@ for _, row in df.iterrows():
     with col3:
         st.metric("Precip", f"{row['precip']:.2f} in/hr")
         st.metric("CAPE", f"{row['cape']:.0f} J/kg")
+        st.metric("Shear (ΔSpeed)", f"{row['shear']:.1f} mph")
+        st.metric("SRH", f"{row['srh']:.0f} m²/s²")
         st.metric("Risk Score", f"{row['risk']}/100")
         st.progress(row["risk"] / 100)
     st.markdown("---")
