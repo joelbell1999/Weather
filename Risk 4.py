@@ -48,7 +48,7 @@ with st.container():
 
     # Add RainViewer radar tile overlay
     folium.raster_layers.TileLayer(
-        tiles="https://tilecache.rainviewer.com/v2/radar/{z}/{x}/{y}/1/1_1.png",
+        tiles="https://tilecache.rainviewer.com/v2/radar/nowcast/0/256/{z}/{x}/{y}/1/1_1.png",
         attr="RainViewer",
         name="RainViewer Radar",
         opacity=0.6,
@@ -193,6 +193,18 @@ forecast = get_tomorrowio_data(lat, lon)
 if not forecast:
     st.stop()
 
+# Open-Meteo fallback for CAPE/CIN
+try:
+    openmeteo_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=cape,cin&timezone=auto"
+    openmeteo_data = requests.get(openmeteo_url).json()
+    openmeteo_hours = openmeteo_data['hourly']
+    openmeteo_times = openmeteo_hours['time']
+    openmeteo_cape = openmeteo_hours['cape'][:12]
+    openmeteo_cin = openmeteo_hours['cin'][:12]
+except:
+    openmeteo_cape = [0]*12
+    openmeteo_cin = [0]*12
+
 hours = forecast['timelines']['hourly']
 df = pd.DataFrame([{
     "time": datetime.fromisoformat(h["time"]).strftime("%a %I:%M %p"),
@@ -203,11 +215,11 @@ df = pd.DataFrame([{
     "gusts": h["values"].get("windGust"),
     "precip": h["values"].get("precipitationIntensity", 0),
     "clouds": h["values"].get("cloudCover"),
-    "cape": h["values"].get("cap", 0),
-    "cin": h["values"].get("cin", 0),
+    "cape": h["values"].get("cap") if h["values"].get("cap") not in [None, 0] else openmeteo_cape[i],
+    "cin": h["values"].get("cin") if h["values"].get("cin") not in [None, 0] else openmeteo_cin[i],
     "shear": abs(h["values"].get("windSpeed500hpa", 0) - h["values"].get("windSpeed1000hpa", 0)),
     "srh": h["values"].get("stormRelativeHelicity", 0)
-} for h in hours[:12]])
+} for i, h in enumerate(hours[:12])])
 
 def calculate_risk(row):
     score = 0
